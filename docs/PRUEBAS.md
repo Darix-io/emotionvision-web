@@ -18,6 +18,11 @@ de pantalla. No se anotan detalles que no se hayan comprobado.
 | CP-09 | Registrar un resultado | El registro se guarda correctamente | Encender la cámara con un rostro y revisar la sección "Estadísticas" | El registro se guarda correctamente (confirmado con captura) | Aprobado |
 | CP-10 | Instalar desde GitHub | Se configura siguiendo el README | Clonar el repositorio en otro equipo y seguir el README paso a paso | — | Pendiente (depende del README y de GitHub) |
 
+Sobre CP-10: el README ya existe y la instalación se comprobó en un entorno virtual limpio
+en el mismo equipo (`pip install -r requirements.txt` y `python manage.py check` sin
+errores). Sigue **Pendiente** porque falta hacerlo clonando desde GitHub en otro equipo,
+y eso incluye crear la base de datos y descargar el modelo allí.
+
 ## 2. Pruebas automáticas
 
 Se ejecutan con:
