@@ -6,6 +6,7 @@ from django.urls import reverse
 
 from .camera import Camara, camara, generar_mjpeg
 from .detector import TEXTO_SIN_ROSTRO, DetectorRostros
+from .emociones import ETIQUETAS, Estimacion, EstimadorEmociones
 
 
 def captura_falsa(abierta=True):
@@ -99,6 +100,92 @@ class DetectorTests(SimpleTestCase):
             cam.iniciar()
         self.assertTrue(cam.leer_jpeg().startswith(b'\xff\xd8'))
         cam.detener()
+
+
+def sesion_falsa(indice_ganador=1):
+    """Simula una sesión de onnxruntime: devuelve 8 valores, uno claramente mayor."""
+    logits = np.zeros((1, 8), dtype=np.float32)
+    logits[0, indice_ganador] = 5.0
+    sesion = MagicMock()
+    entrada = MagicMock()
+    entrada.name = 'Input3'
+    sesion.get_inputs.return_value = [entrada]
+    sesion.run.return_value = [logits]
+    return sesion
+
+
+class EstimadorEmocionesTests(SimpleTestCase):
+    def test_devuelve_emocion_en_espanol_y_confianza(self):
+        sesion = sesion_falsa(indice_ganador=1)
+        estimador = EstimadorEmociones(sesion=sesion)
+        resultado = estimador.estimar(np.full((80, 70), 128, dtype=np.uint8))
+        self.assertEqual(resultado.emocion, 'feliz')
+        self.assertGreater(resultado.confianza, 0.9)
+        self.assertLessEqual(resultado.confianza, 1.0)
+        self.assertRegex(resultado.texto, r'^Feliz \d+%$')
+
+    def test_el_recorte_se_ajusta_a_64x64(self):
+        sesion = sesion_falsa()
+        EstimadorEmociones(sesion=sesion).estimar(np.zeros((90, 50), dtype=np.uint8))
+        entrada = sesion.run.call_args[0][1]['Input3']
+        self.assertEqual(entrada.shape, (1, 1, 64, 64))
+        self.assertEqual(entrada.dtype, np.float32)
+
+    def test_las_8_etiquetas_en_espanol(self):
+        self.assertEqual(ETIQUETAS, ('neutral', 'feliz', 'sorpresa', 'tristeza',
+                                     'enojo', 'asco', 'miedo', 'desprecio'))
+
+    def test_modelo_inexistente_no_falla(self):
+        estimador = EstimadorEmociones(ruta_modelo='no_existe/modelo.onnx')
+        self.assertFalse(estimador.disponible)
+        self.assertIsNone(estimador.estimar(np.zeros((64, 64), dtype=np.uint8)))
+
+    def test_modelo_que_falla_devuelve_none(self):
+        sesion = sesion_falsa()
+        sesion.run.side_effect = RuntimeError('fallo simulado')
+        estimador = EstimadorEmociones(sesion=sesion)
+        with self.assertLogs('emociones.emociones', level='ERROR'):
+            self.assertIsNone(estimador.estimar(np.zeros((64, 64), dtype=np.uint8)))
+
+    def test_recorte_vacio_devuelve_none(self):
+        estimador = EstimadorEmociones(sesion=sesion_falsa())
+        self.assertIsNone(estimador.estimar(np.zeros((0, 0), dtype=np.uint8)))
+
+
+class IntegracionEtiquetasTests(SimpleTestCase):
+    def _camara_con_rostro(self, estimador):
+        falsa = captura_falsa()
+        cam = Camara(estimador=estimador)
+        with patch('emociones.camera.cv2.VideoCapture', return_value=falsa):
+            cam.iniciar()
+        return cam
+
+    def test_se_estima_cada_rostro_y_se_entrega_jpeg(self):
+        estimador = MagicMock()
+        estimador.estimar.return_value = Estimacion('feliz', 0.82)
+        cam = self._camara_con_rostro(estimador)
+        with patch.object(cam.detector, 'detectar', return_value=[(10, 10, 30, 30)]):
+            jpeg = cam.leer_jpeg()
+        self.assertTrue(jpeg.startswith(b'\xff\xd8'))
+        recorte = estimador.estimar.call_args[0][0]
+        self.assertEqual(recorte.shape, (30, 30))  # recorte gris del rostro
+        cam.detener()
+
+    def test_sin_modelo_el_video_sigue_con_recuadros(self):
+        estimador = EstimadorEmociones(ruta_modelo='no_existe/modelo.onnx')
+        cam = self._camara_con_rostro(estimador)
+        with patch.object(cam.detector, 'detectar', return_value=[(10, 10, 30, 30)]):
+            jpeg = cam.leer_jpeg()
+        self.assertTrue(jpeg.startswith(b'\xff\xd8'))
+        cam.detener()
+
+    def test_etiqueta_se_dibuja_sobre_el_recuadro(self):
+        detector = DetectorRostros()
+        sin_etiqueta = np.zeros((120, 160, 3), dtype=np.uint8)
+        con_etiqueta = sin_etiqueta.copy()
+        detector.dibujar(sin_etiqueta, [(40, 50, 60, 60)])
+        detector.dibujar(con_etiqueta, [(40, 50, 60, 60)], ['Feliz 82%'])
+        self.assertFalse(np.array_equal(sin_etiqueta[30:50], con_etiqueta[30:50]))
 
 
 class CamaraTests(SimpleTestCase):

@@ -5,3 +5,7 @@ __pycache__/
 db.sqlite3
 .idea/
 .vscode/
+
+# Modelo de emociones (pesa ~33 MB): se descarga aparte. Ver emociones/modelos/LEEME.md
+emociones/modelos/*
+!emociones/modelos/LEEME.md

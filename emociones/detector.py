@@ -29,10 +29,19 @@ class DetectorRostros:
             gris, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
         return [tuple(int(v) for v in r) for r in rostros]
 
-    def dibujar(self, fotograma, rostros):
-        """Dibuja un rectángulo por rostro, o un texto discreto si no hay ninguno."""
-        for x, y, ancho, alto in rostros:
+    def dibujar(self, fotograma, rostros, etiquetas=None):
+        """Dibuja un rectángulo por rostro (con su etiqueta si la hay).
+
+        Si no hay rostros, escribe un texto discreto.
+        """
+        for i, (x, y, ancho, alto) in enumerate(rostros):
             cv2.rectangle(fotograma, (x, y), (x + ancho, y + alto), COLOR_RECUADRO, 2)
+            etiqueta = etiquetas[i] if etiquetas and i < len(etiquetas) else None
+            if etiqueta:
+                # Si no cabe arriba del recuadro, se escribe dentro.
+                pos_y = y - 8 if y > 22 else y + 20
+                cv2.putText(fotograma, etiqueta, (x, pos_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, COLOR_RECUADRO, 2, cv2.LINE_AA)
         if not rostros:
             alto_img = fotograma.shape[0]
             cv2.putText(fotograma, TEXTO_SIN_ROSTRO, (10, alto_img - 12),

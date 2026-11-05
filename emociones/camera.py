@@ -5,14 +5,16 @@ import threading
 import cv2
 
 from .detector import DetectorRostros
+from .emociones import EstimadorEmociones
 
 
 class Camara:
     """Abre la cámara, entrega fotogramas JPEG y la libera al detener."""
 
-    def __init__(self, indice=0, detector=None):
+    def __init__(self, indice=0, detector=None, estimador=None):
         self.indice = indice
         self.detector = detector or DetectorRostros()
+        self.estimador = estimador or EstimadorEmociones()
         self._captura = None
         self._lock = threading.Lock()
 
@@ -34,6 +36,17 @@ class Camara:
             self._captura = captura
             return True
 
+    def _etiquetas(self, fotograma, rostros):
+        """Texto por rostro (ej. 'Feliz 82%'); None si no hay estimación."""
+        if not rostros:
+            return []
+        gris = cv2.cvtColor(fotograma, cv2.COLOR_BGR2GRAY)
+        etiquetas = []
+        for x, y, ancho, alto in rostros:
+            estimacion = self.estimador.estimar(gris[y:y + alto, x:x + ancho])
+            etiquetas.append(estimacion.texto if estimacion else None)
+        return etiquetas
+
     def leer_jpeg(self):
         """Devuelve un fotograma en bytes JPEG, o None si no se pudo leer."""
         with self._lock:
@@ -42,9 +55,11 @@ class Camara:
             ok, fotograma = self._captura.read()
             if not ok:
                 return None
-            # Dibuja los recuadros; si algo falla, el video sigue sin ellos.
+            # Recuadros y etiquetas; si algo falla, el video sigue sin ellos.
             try:
-                self.detector.procesar(fotograma)
+                rostros = self.detector.detectar(fotograma)
+                etiquetas = self._etiquetas(fotograma, rostros)
+                self.detector.dibujar(fotograma, rostros, etiquetas)
             except cv2.error:
                 pass
             ok, jpeg = cv2.imencode('.jpg', fotograma)
