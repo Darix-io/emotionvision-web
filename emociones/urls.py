@@ -6,4 +6,7 @@ app_name = 'emociones'
 
 urlpatterns = [
     path('', views.inicio, name='inicio'),
+    path('camara/iniciar/', views.iniciar_camara, name='iniciar_camara'),
+    path('camara/video/', views.video, name='video'),
+    path('camara/detener/', views.detener_camara, name='detener_camara'),
 ]
