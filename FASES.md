@@ -27,13 +27,15 @@ pocas líneas, hace commit y **se detiene**. Se continúa solo con
 
 | Código | Prueba | Resultado esperado | Resultado observado |
 |---|---|---|---|
-| CP-01 | Iniciar aplicación | Django funciona | |
-| CP-02 | Activar cámara | El video aparece | |
-| CP-03 | Mostrar un rostro | El rostro es detectado | |
-| CP-04 | Analizar una expresión | El modelo devuelve una estimación | |
-| CP-05 | Mostrar resultado | La etiqueta aparece en el video | |
-| CP-06 | No detectar rostro | El sistema continúa funcionando | |
-| CP-07 | Detener cámara | La captura finaliza | |
-| CP-08 | Conectar PostgreSQL | La aplicación accede a la base de datos | |
-| CP-09 | Registrar un resultado | El registro se guarda correctamente | |
-| CP-10 | Instalar desde GitHub | Se configura siguiendo el README | |
+| CP-01 | Iniciar aplicación | Django funciona | Django funciona (confirmado con captura) |
+| CP-02 | Activar cámara | El video aparece | El video aparece (confirmado con captura) |
+| CP-03 | Mostrar un rostro | El rostro es detectado | El rostro es detectado (confirmado con captura) |
+| CP-04 | Analizar una expresión | El modelo devuelve una estimación | El modelo devuelve una estimación (confirmado con captura) |
+| CP-05 | Mostrar resultado | La etiqueta aparece en el video | La etiqueta aparece en el video (confirmado con captura) |
+| CP-06 | No detectar rostro | El sistema continúa funcionando | El sistema continúa funcionando sin rostro (confirmado con captura) |
+| CP-07 | Detener cámara | La captura finaliza | La captura finaliza (confirmado con captura) |
+| CP-08 | Conectar PostgreSQL | La aplicación accede a la base de datos | La aplicación accede a la base de datos (confirmado con captura) |
+| CP-09 | Registrar un resultado | El registro se guarda correctamente | El registro se guarda correctamente (confirmado con captura) |
+| CP-10 | Instalar desde GitHub | Se configura siguiendo el README | Pendiente (depende del README y de GitHub) |
+
+Detalle de cada caso, pruebas automáticas y limitaciones: [docs/PRUEBAS.md](docs/PRUEBAS.md).

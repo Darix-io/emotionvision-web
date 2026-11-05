@@ -1,5 +1,8 @@
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import cv2
 import numpy as np
 from django.contrib.staticfiles import finders
 from django.db import OperationalError
@@ -10,7 +13,7 @@ from .camera import Camara, camara, generar_mjpeg
 from .detector import TEXTO_SIN_ROSTRO, DetectorRostros
 from .emociones import ETIQUETAS, Estimacion, EstimadorEmociones
 from .models import RegistroEmocion
-from .registro import RegistradorEmociones
+from .registro import RegistradorEmociones, borrar_registros, estadisticas
 
 
 def captura_falsa(abierta=True):
@@ -405,6 +408,225 @@ class VistasRegistrosTests(TestCase):
         self.assertIn('Últimos 10 registros', html)
         self.assertIn('No se guarda video ni imágenes', html)
         self.assertIn('no un diagnóstico', html)
+
+
+class DetectorCasosBordeTests(SimpleTestCase):
+    def setUp(self):
+        self.detector = DetectorRostros()
+
+    def test_si_no_carga_el_clasificador_lanza_error_claro(self):
+        vacio = MagicMock()
+        vacio.empty.return_value = True
+        with patch('emociones.detector.cv2.CascadeClassifier', return_value=vacio):
+            with self.assertRaisesMessage(RuntimeError, 'No se pudo cargar el clasificador'):
+                DetectorRostros()
+
+    def test_detectar_devuelve_tuplas_de_enteros(self):
+        crudo = np.array([[1, 2, 60, 70]], dtype=np.int32)
+        self.detector._clasificador = MagicMock()  # el de OpenCV no se puede parchear
+        self.detector._clasificador.detectMultiScale.return_value = crudo
+        rostros = self.detector.detectar(np.zeros((100, 100, 3), dtype=np.uint8))
+        self.assertEqual(rostros, [(1, 2, 60, 70)])
+        self.assertTrue(all(type(v) is int for v in rostros[0]))
+
+    def test_etiqueta_en_el_borde_no_falla_y_queda_dentro_de_la_imagen(self):
+        imagen = np.zeros((120, 160, 3), dtype=np.uint8)
+        self.detector.dibujar(imagen, [(150, 0, 10, 10)], ['Desprecio 100%'])
+        self.assertTrue(imagen.any())
+        self.assertEqual(imagen.shape, (120, 160, 3))
+
+    def test_menos_etiquetas_que_rostros(self):
+        imagen = np.zeros((120, 160, 3), dtype=np.uint8)
+        self.detector.dibujar(imagen, [(10, 40, 30, 30), (90, 40, 30, 30)], ['Feliz 80%'])
+        self.assertTrue(imagen[40, 10:40].any())
+        self.assertTrue(imagen[40, 90:120].any())  # ambos recuadros se dibujan
+
+    def test_con_rostros_no_aparece_el_texto_sin_rostro(self):
+        con_rostro = np.zeros((120, 160, 3), dtype=np.uint8)
+        self.detector.dibujar(con_rostro, [(10, 10, 30, 30)])
+        self.assertFalse(con_rostro[100:, :].any())
+
+    def test_procesar_devuelve_la_lista_de_rostros(self):
+        with patch.object(self.detector, 'detectar', return_value=[(5, 5, 20, 20)]):
+            imagen = np.zeros((60, 60, 3), dtype=np.uint8)
+            self.assertEqual(self.detector.procesar(imagen), [(5, 5, 20, 20)])
+        self.assertTrue(imagen.any())
+
+
+class EstimadorCasosBordeTests(SimpleTestCase):
+    def test_texto_redondea_el_porcentaje(self):
+        self.assertEqual(Estimacion('miedo', 0.456).texto, 'Miedo 46%')
+        self.assertEqual(Estimacion('neutral', 1.0).texto, 'Neutral 100%')
+
+    def test_la_confianza_es_una_probabilidad(self):
+        sesion = sesion_falsa()
+        sesion.run.return_value = [np.zeros((1, 8), dtype=np.float32)]  # todos iguales
+        resultado = EstimadorEmociones(sesion=sesion).estimar(np.zeros((64, 64), dtype=np.uint8))
+        self.assertAlmostEqual(resultado.confianza, 1 / 8, places=5)
+
+    def test_salida_de_tamano_incorrecto_devuelve_none(self):
+        sesion = sesion_falsa()
+        sesion.run.return_value = [np.zeros((1, 3), dtype=np.float32)]
+        self.assertIsNone(
+            EstimadorEmociones(sesion=sesion).estimar(np.zeros((64, 64), dtype=np.uint8)))
+
+    def test_no_modifica_el_recorte_recibido(self):
+        recorte = np.full((80, 80), 100, dtype=np.uint8)
+        copia = recorte.copy()
+        EstimadorEmociones(sesion=sesion_falsa()).estimar(recorte)
+        self.assertTrue(np.array_equal(recorte, copia))
+
+    def test_archivo_que_no_es_un_modelo_deja_el_estimador_desactivado(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / 'falso.onnx'
+            ruta.write_bytes(b'esto no es un modelo onnx')
+            estimador = EstimadorEmociones(ruta_modelo=ruta)
+            with self.assertLogs('emociones.emociones', level='ERROR'):
+                self.assertFalse(estimador.disponible)
+            self.assertIsNone(estimador.estimar(np.zeros((64, 64), dtype=np.uint8)))
+
+    def test_el_modelo_se_carga_una_sola_vez(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / 'modelo.onnx'
+            ruta.write_bytes(b'x')
+            with patch('onnxruntime.InferenceSession', return_value=sesion_falsa()) as cargar:
+                estimador = EstimadorEmociones(ruta_modelo=ruta)
+                for _ in range(3):
+                    estimador.estimar(np.zeros((64, 64), dtype=np.uint8))
+                self.assertEqual(cargar.call_count, 1)
+
+    def test_si_la_carga_falla_no_se_reintenta_en_cada_fotograma(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / 'modelo.onnx'
+            ruta.write_bytes(b'x')
+            with patch('onnxruntime.InferenceSession',
+                       side_effect=RuntimeError('fallo')) as cargar:
+                estimador = EstimadorEmociones(ruta_modelo=ruta)
+                with self.assertLogs('emociones.emociones', level='ERROR'):
+                    estimador.estimar(np.zeros((64, 64), dtype=np.uint8))
+                estimador.estimar(np.zeros((64, 64), dtype=np.uint8))
+                self.assertEqual(cargar.call_count, 1)
+
+
+class CamaraCasosBordeTests(SimpleTestCase):
+    def _camara(self, falsa=None):
+        cam = Camara(registrador=MagicMock())
+        falsa = falsa or captura_falsa()
+        with patch('emociones.camera.cv2.VideoCapture', return_value=falsa) as vc:
+            cam.iniciar()
+        return cam, falsa, vc
+
+    def test_iniciar_dos_veces_no_vuelve_a_abrir_la_camara(self):
+        cam, _, vc = self._camara()
+        with patch('emociones.camera.cv2.VideoCapture') as otra:
+            self.assertTrue(cam.iniciar())
+            otra.assert_not_called()
+        self.assertEqual(vc.call_count, 1)
+        cam.detener()
+
+    def test_sin_camara_libera_el_recurso_y_queda_apagada(self):
+        falsa = captura_falsa(abierta=False)
+        cam, _, _ = self._camara(falsa)
+        self.assertFalse(cam.activa)
+        falsa.release.assert_called_once()
+
+    def test_si_falla_la_lectura_devuelve_none(self):
+        falsa = captura_falsa()
+        falsa.read.return_value = (False, None)
+        cam, _, _ = self._camara(falsa)
+        self.assertIsNone(cam.leer_jpeg())
+        cam.detener()
+
+    def test_error_del_detector_no_rompe_el_video(self):
+        cam, _, _ = self._camara()
+        with patch.object(cam.detector, 'detectar', side_effect=cv2.error('fallo simulado')):
+            jpeg = cam.leer_jpeg()
+        self.assertTrue(jpeg.startswith(b'\xff\xd8'))
+        self.assertEqual(cam.estado()['rostros'], 0)
+        cam.detener()
+
+    def test_estado_apagada(self):
+        self.assertEqual(Camara(registrador=MagicMock()).estado(),
+                         {'activa': False, 'rostros': 0, 'emocion': None, 'confianza': None})
+
+    def test_flujo_sin_camara_encendida_no_entrega_nada(self):
+        cam = Camara(registrador=MagicMock())
+        self.assertEqual(list(generar_mjpeg(cam)), [])
+
+    def test_flujo_termina_y_libera_si_falla_la_lectura(self):
+        falsa = captura_falsa()
+        cam, _, _ = self._camara(falsa)
+        falsa.read.return_value = (False, None)
+        self.assertEqual(list(generar_mjpeg(cam)), [])
+        self.assertFalse(cam.activa)
+        falsa.release.assert_called_once()
+
+    def test_detener_dos_veces_no_falla(self):
+        cam, falsa, _ = self._camara()
+        cam.detener()
+        cam.detener()
+        falsa.release.assert_called_once()
+
+
+class RegistroCasosBordeTests(TestCase):
+    def test_reiniciar_permite_guardar_de_inmediato(self):
+        reloj = RelojFalso()
+        reg = RegistradorEmociones(reloj=reloj)
+        self.assertTrue(reg.registrar(Estimacion('feliz', 0.8)))
+        self.assertFalse(reg.registrar(Estimacion('feliz', 0.8)))
+        reg.reiniciar()
+        self.assertTrue(reg.registrar(Estimacion('feliz', 0.8)))
+
+    def test_borrar_registros_devuelve_la_cantidad(self):
+        self.assertEqual(borrar_registros(), 0)
+        RegistroEmocion.objects.create(emocion='feliz', confianza=0.5)
+        RegistroEmocion.objects.create(emocion='feliz', confianza=0.6)
+        self.assertEqual(borrar_registros(), 2)
+        self.assertEqual(RegistroEmocion.objects.count(), 0)
+
+    def test_empate_en_estadisticas_se_ordena_por_nombre(self):
+        RegistroEmocion.objects.create(emocion='miedo', confianza=0.5)
+        RegistroEmocion.objects.create(emocion='asco', confianza=0.5)
+        nombres = [e['emocion'] for e in estadisticas()['por_emocion']]
+        self.assertEqual(nombres, ['asco', 'miedo'])
+
+    def test_ultimos_registros_traen_fecha_hora_y_porcentaje(self):
+        RegistroEmocion.objects.create(emocion='tristeza', confianza=0.734)
+        ultimo = estadisticas()['ultimos'][0]
+        self.assertEqual(set(ultimo), {'fecha', 'hora', 'emocion', 'confianza'})
+        self.assertEqual(ultimo['confianza'], 73)
+        self.assertRegex(ultimo['hora'], r'^\d{2}:\d{2}:\d{2}$')
+
+
+class VistasCasosBordeTests(TestCase):
+    def setUp(self):
+        camara.detener()
+        self.addCleanup(camara.detener)
+
+    def test_iniciar_dos_veces_responde_ok(self):
+        with patch('emociones.camera.cv2.VideoCapture', return_value=captura_falsa()):
+            self.assertTrue(self.client.post(reverse('emociones:iniciar_camara')).json()['ok'])
+            self.assertTrue(self.client.post(reverse('emociones:iniciar_camara')).json()['ok'])
+
+    def test_detener_sin_haber_iniciado_responde_ok(self):
+        respuesta = self.client.post(reverse('emociones:detener_camara'))
+        self.assertTrue(respuesta.json()['ok'])
+
+    def test_video_transmite_jpeg_y_libera_la_camara_al_cerrar(self):
+        with patch('emociones.camera.cv2.VideoCapture', return_value=captura_falsa()):
+            self.client.post(reverse('emociones:iniciar_camara'))
+        respuesta = self.client.get(reverse('emociones:video'))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertTrue(respuesta['Content-Type'].startswith('multipart/x-mixed-replace'))
+        primer_trozo = next(iter(respuesta.streaming_content))
+        self.assertIn(b'Content-Type: image/jpeg', primer_trozo)
+        respuesta.close()  # el navegador cortó la conexión
+        self.assertFalse(camara.activa)
+
+    def test_video_sin_iniciar_devuelve_mensaje(self):
+        datos = self.client.get(reverse('emociones:video')).json()
+        self.assertFalse(datos['ok'])
+        self.assertIn('no está iniciada', datos['mensaje'])
 
 
 class CamaraTests(SimpleTestCase):
