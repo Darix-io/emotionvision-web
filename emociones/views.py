@@ -35,6 +35,12 @@ def video(request):
     )
 
 
+@require_GET
+def estado(request):
+    """Estado actual para el panel: cámara y emoción estimada (solo en memoria)."""
+    return JsonResponse(camara.estado())
+
+
 @require_POST
 def detener_camara(request):
     """Libera la cámara."""

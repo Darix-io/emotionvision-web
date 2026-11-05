@@ -9,6 +9,7 @@ import cv2
 ARCHIVO_CASCADA = 'haarcascade_frontalface_default.xml'
 COLOR_RECUADRO = (0, 200, 0)  # verde (BGR)
 COLOR_TEXTO = (200, 200, 200)
+COLOR_TEXTO_ETIQUETA = (0, 0, 0)  # negro sobre fondo verde: se lee bien
 TEXTO_SIN_ROSTRO = 'Sin rostro detectado'
 
 
@@ -29,6 +30,20 @@ class DetectorRostros:
             gris, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
         return [tuple(int(v) for v in r) for r in rostros]
 
+    @staticmethod
+    def _dibujar_etiqueta(fotograma, texto, x, y):
+        """Texto grande sobre un fondo verde, pegado a la parte de arriba del recuadro."""
+        fuente, escala, grosor = cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
+        (ancho_t, alto_t), base = cv2.getTextSize(texto, fuente, escala, grosor)
+        alto_caja = alto_t + base + 10
+        # Si no cabe arriba del recuadro, se escribe dentro.
+        arriba = y - alto_caja if y - alto_caja >= 0 else y
+        x0 = max(0, min(x, fotograma.shape[1] - ancho_t - 10))
+        cv2.rectangle(fotograma, (x0, arriba), (x0 + ancho_t + 10, arriba + alto_caja),
+                      COLOR_RECUADRO, cv2.FILLED)
+        cv2.putText(fotograma, texto, (x0 + 5, arriba + alto_t + 5),
+                    fuente, escala, COLOR_TEXTO_ETIQUETA, grosor, cv2.LINE_AA)
+
     def dibujar(self, fotograma, rostros, etiquetas=None):
         """Dibuja un rectángulo por rostro (con su etiqueta si la hay).
 
@@ -38,10 +53,7 @@ class DetectorRostros:
             cv2.rectangle(fotograma, (x, y), (x + ancho, y + alto), COLOR_RECUADRO, 2)
             etiqueta = etiquetas[i] if etiquetas and i < len(etiquetas) else None
             if etiqueta:
-                # Si no cabe arriba del recuadro, se escribe dentro.
-                pos_y = y - 8 if y > 22 else y + 20
-                cv2.putText(fotograma, etiqueta, (x, pos_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, COLOR_RECUADRO, 2, cv2.LINE_AA)
+                self._dibujar_etiqueta(fotograma, etiqueta, x, y)
         if not rostros:
             alto_img = fotograma.shape[0]
             cv2.putText(fotograma, TEXTO_SIN_ROSTRO, (10, alto_img - 12),

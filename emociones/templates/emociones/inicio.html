@@ -1,90 +1,71 @@
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>EmotionVision Web</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 700px; margin: 3rem auto; padding: 0 1rem; color: #222; }
-        h1 { margin-bottom: 0.25rem; }
-        .aviso { background: #fff7e0; border-left: 4px solid #e0a800; padding: 0.75rem 1rem; margin-top: 2rem; }
-        .visor { background: #111; color: #ccc; min-height: 360px; display: flex; align-items: center; justify-content: center; margin: 1rem 0; }
-        .visor img { max-width: 100%; display: none; }
-        button { padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
-        #mensaje { margin-top: 0.5rem; color: #b00020; min-height: 1.5rem; }
-    </style>
+    <link rel="stylesheet" href="{% static 'emociones/css/estilos.css' %}">
 </head>
 <body>
-    <h1>EmotionVision Web</h1>
-    <p>Aplicación que usa la cámara para detectar rostros y mostrar una
-       <strong>estimación</strong> de emociones.</p>
+    <header class="cabecera">
+        <div>
+            <h1>EmotionVision Web</h1>
+            <p class="subtitulo">Detecta rostros con la cámara y muestra una <strong>estimación</strong> de emociones.</p>
+        </div>
+        <div id="estado-camara" class="estado estado-apagada" role="status" aria-live="polite">
+            <span class="punto"></span>
+            <span id="estado-texto">Cámara apagada</span>
+        </div>
+    </header>
 
-    <div class="visor">
-        <span id="espera">La cámara está apagada.</span>
-        <img id="video" alt="Video de la cámara">
-    </div>
+    <main id="app" class="contenido"
+          data-url-iniciar="{% url 'emociones:iniciar_camara' %}"
+          data-url-video="{% url 'emociones:video' %}"
+          data-url-estado="{% url 'emociones:estado' %}"
+          data-url-detener="{% url 'emociones:detener_camara' %}">
 
-    <button id="btn-iniciar" type="button">Iniciar cámara</button>
-    <button id="btn-detener" type="button" disabled>Detener cámara</button>
-    <div id="mensaje" role="alert"></div>
+        <section class="columna-video" aria-label="Video">
+            <div class="visor">
+                <span id="espera" class="espera">La cámara está apagada.</span>
+                <img id="video" alt="Video de la cámara con los rostros detectados">
+            </div>
+            <div class="controles">
+                <button id="btn-iniciar" type="button" class="boton boton-iniciar">Iniciar cámara</button>
+                <button id="btn-detener" type="button" class="boton boton-detener" disabled>Detener cámara</button>
+            </div>
+            <p id="mensaje" class="mensaje-error" role="alert"></p>
+        </section>
 
-    <div class="aviso">
-        Los resultados serán estimaciones de un modelo, no un diagnóstico.
-        Pueden fallar según la iluminación, la posición y la cámara.
-    </div>
+        <aside class="panel" aria-label="Resultado estimado">
+            <h2>Emoción estimada</h2>
+            <p id="panel-emocion" class="panel-emocion">—</p>
+            <div class="barra" aria-hidden="true"><div id="barra-relleno" class="barra-relleno"></div></div>
+            <p id="panel-confianza" class="panel-confianza">Confianza: —</p>
+            <p id="panel-rostros" class="panel-rostros">Rostros detectados: 0</p>
+            <p class="panel-nota">Es una estimación del modelo. Puede equivocarse según la iluminación,
+               la posición y la cámara.</p>
+        </aside>
+    </main>
+
+    <footer class="aviso">
+        <strong>Aviso:</strong> los resultados son estimaciones de un modelo, no un diagnóstico
+        ni el estado psicológico real de una persona.
+    </footer>
+
+    <dialog id="dlg-privacidad" class="dialogo" aria-labelledby="dlg-titulo">
+        <h2 id="dlg-titulo">Antes de encender la cámara</h2>
+        <ul>
+            <li>No se guarda video ni imágenes.</li>
+            <li>No se identifica a nadie: solo se estima una emoción.</li>
+            <li>Puedes detener la cámara en cualquier momento con el botón "Detener cámara".</li>
+        </ul>
+        <div class="controles">
+            <button id="dlg-aceptar" type="button" class="boton boton-iniciar">Aceptar y encender</button>
+            <button id="dlg-cancelar" type="button" class="boton boton-secundario">Cancelar</button>
+        </div>
+    </dialog>
 
     {% csrf_token %}
-    <script>
-        const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
-        const video = document.getElementById('video');
-        const espera = document.getElementById('espera');
-        const mensaje = document.getElementById('mensaje');
-        const btnIniciar = document.getElementById('btn-iniciar');
-        const btnDetener = document.getElementById('btn-detener');
-
-        function mostrarApagada(texto) {
-            video.removeAttribute('src');
-            video.style.display = 'none';
-            espera.textContent = texto;
-            espera.style.display = 'inline';
-            btnIniciar.disabled = false;
-            btnDetener.disabled = true;
-        }
-
-        async function post(url) {
-            return fetch(url, { method: 'POST', headers: { 'X-CSRFToken': csrf } });
-        }
-
-        btnIniciar.addEventListener('click', async () => {
-            mensaje.textContent = '';
-            btnIniciar.disabled = true;
-            try {
-                const resp = await post("{% url 'emociones:iniciar_camara' %}");
-                const datos = await resp.json();
-                if (!resp.ok || !datos.ok) {
-                    mensaje.textContent = datos.mensaje || 'No se pudo iniciar la cámara.';
-                    mostrarApagada('La cámara está apagada.');
-                    return;
-                }
-                // Se agrega un número para que el navegador no reutilice una conexión vieja.
-                video.src = "{% url 'emociones:video' %}?t=" + Date.now();
-                video.style.display = 'block';
-                espera.style.display = 'none';
-                btnDetener.disabled = false;
-            } catch (e) {
-                mensaje.textContent = 'No se pudo comunicar con el servidor.';
-                mostrarApagada('La cámara está apagada.');
-            }
-        });
-
-        btnDetener.addEventListener('click', async () => {
-            video.removeAttribute('src');
-            await post("{% url 'emociones:detener_camara' %}");
-            mostrarApagada('La cámara está apagada.');
-        });
-
-        // Si el usuario cierra o recarga la página, el servidor libera la cámara
-        // al cortarse la conexión de video.
-    </script>
+    <script src="{% static 'emociones/js/app.js' %}"></script>
 </body>
 </html>

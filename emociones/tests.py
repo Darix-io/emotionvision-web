@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+from django.contrib.staticfiles import finders
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
@@ -28,6 +29,18 @@ class InicioTests(TestCase):
         self.assertContains(respuesta, 'Iniciar cámara')
         self.assertContains(respuesta, 'Detener cámara')
         self.assertContains(respuesta, 'estimaciones')
+
+    def test_pagina_tiene_aviso_de_privacidad_estado_y_panel(self):
+        html = self.client.get(reverse('emociones:inicio')).content.decode()
+        self.assertIn('No se guarda video ni imágenes', html)
+        self.assertIn('Cámara apagada', html)
+        self.assertIn('Emoción estimada', html)
+        self.assertIn('no un diagnóstico', html)
+        self.assertIn('Aceptar y encender', html)
+
+    def test_archivos_estaticos_existen(self):
+        for ruta in ('emociones/css/estilos.css', 'emociones/js/app.js'):
+            self.assertIsNotNone(finders.find(ruta), ruta)
 
     def test_abrir_pagina_no_enciende_la_camara(self):
         with patch('emociones.camera.cv2.VideoCapture') as vc:
@@ -186,6 +199,66 @@ class IntegracionEtiquetasTests(SimpleTestCase):
         detector.dibujar(sin_etiqueta, [(40, 50, 60, 60)])
         detector.dibujar(con_etiqueta, [(40, 50, 60, 60)], ['Feliz 82%'])
         self.assertFalse(np.array_equal(sin_etiqueta[30:50], con_etiqueta[30:50]))
+
+
+class EstadoPanelTests(TestCase):
+    def setUp(self):
+        camara.detener()
+        self.addCleanup(camara.detener)
+
+    def test_estado_con_camara_apagada(self):
+        datos = self.client.get(reverse('emociones:estado')).json()
+        self.assertEqual(datos, {'activa': False, 'rostros': 0,
+                                 'emocion': None, 'confianza': None})
+
+    def test_estado_solo_acepta_get(self):
+        self.assertEqual(self.client.post(reverse('emociones:estado')).status_code, 405)
+
+    def test_estado_sin_rostro(self):
+        with patch('emociones.camera.cv2.VideoCapture', return_value=captura_falsa()):
+            camara.iniciar()
+        camara.leer_jpeg()  # fotograma negro: no hay rostros
+        datos = self.client.get(reverse('emociones:estado')).json()
+        self.assertTrue(datos['activa'])
+        self.assertEqual(datos['rostros'], 0)
+        self.assertIsNone(datos['emocion'])
+
+    def test_estado_con_rostro_y_emocion(self):
+        estimador = MagicMock()
+        estimador.estimar.return_value = Estimacion('feliz', 0.82)
+        cam = Camara(estimador=estimador)
+        with patch('emociones.camera.cv2.VideoCapture', return_value=captura_falsa()):
+            cam.iniciar()
+        with patch.object(cam.detector, 'detectar', return_value=[(10, 10, 30, 30)]):
+            cam.leer_jpeg()
+        self.assertEqual(cam.estado(), {'activa': True, 'rostros': 1,
+                                        'emocion': 'feliz', 'confianza': 82})
+        cam.detener()
+        self.assertFalse(cam.estado()['activa'])
+        self.assertIsNone(cam.estado()['emocion'])
+
+    def test_con_varios_rostros_se_usa_el_mas_grande(self):
+        estimador = MagicMock()
+        estimador.estimar.side_effect = [Estimacion('triste', 0.6), Estimacion('feliz', 0.9)]
+        cam = Camara(estimador=estimador)
+        with patch('emociones.camera.cv2.VideoCapture', return_value=captura_falsa()):
+            cam.iniciar()
+        rostros = [(0, 0, 10, 10), (20, 5, 40, 40)]
+        with patch.object(cam.detector, 'detectar', return_value=rostros):
+            cam.leer_jpeg()
+        self.assertEqual(cam.estado()['emocion'], 'feliz')
+        cam.detener()
+
+    def test_modelo_ausente_reporta_rostro_sin_emocion(self):
+        cam = Camara(estimador=EstimadorEmociones(ruta_modelo='no_existe/m.onnx'))
+        with patch('emociones.camera.cv2.VideoCapture', return_value=captura_falsa()):
+            cam.iniciar()
+        with patch.object(cam.detector, 'detectar', return_value=[(10, 10, 30, 30)]):
+            cam.leer_jpeg()
+        datos = cam.estado()
+        self.assertEqual(datos['rostros'], 1)
+        self.assertIsNone(datos['emocion'])
+        cam.detener()
 
 
 class CamaraTests(SimpleTestCase):
