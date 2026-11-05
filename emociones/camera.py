@@ -4,12 +4,15 @@ import threading
 
 import cv2
 
+from .detector import DetectorRostros
+
 
 class Camara:
     """Abre la cámara, entrega fotogramas JPEG y la libera al detener."""
 
-    def __init__(self, indice=0):
+    def __init__(self, indice=0, detector=None):
         self.indice = indice
+        self.detector = detector or DetectorRostros()
         self._captura = None
         self._lock = threading.Lock()
 
@@ -39,6 +42,11 @@ class Camara:
             ok, fotograma = self._captura.read()
             if not ok:
                 return None
+            # Dibuja los recuadros; si algo falla, el video sigue sin ellos.
+            try:
+                self.detector.procesar(fotograma)
+            except cv2.error:
+                pass
             ok, jpeg = cv2.imencode('.jpg', fotograma)
             return jpeg.tobytes() if ok else None
 

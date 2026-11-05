@@ -5,6 +5,7 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from .camera import Camara, camara, generar_mjpeg
+from .detector import TEXTO_SIN_ROSTRO, DetectorRostros
 
 
 def captura_falsa(abierta=True):
@@ -65,6 +66,39 @@ class VistasCamaraTests(TestCase):
     def test_iniciar_y_detener_solo_aceptan_post(self):
         self.assertEqual(self.client.get(reverse('emociones:iniciar_camara')).status_code, 405)
         self.assertEqual(self.client.get(reverse('emociones:detener_camara')).status_code, 405)
+
+
+class DetectorTests(SimpleTestCase):
+    def setUp(self):
+        self.detector = DetectorRostros()
+
+    def test_imagen_en_blanco_no_tiene_rostros(self):
+        blanco = np.full((240, 320, 3), 255, dtype=np.uint8)
+        self.assertEqual(self.detector.detectar(blanco), [])
+
+    def test_imagen_vacia_o_nula_no_falla(self):
+        self.assertEqual(self.detector.detectar(None), [])
+        self.assertEqual(self.detector.detectar(np.zeros((0, 0, 3), dtype=np.uint8)), [])
+
+    def test_sin_rostro_dibuja_texto_y_no_falla(self):
+        negro = np.zeros((240, 320, 3), dtype=np.uint8)
+        rostros = self.detector.procesar(negro)
+        self.assertEqual(rostros, [])
+        self.assertTrue(negro.any(), f'Debe dibujarse "{TEXTO_SIN_ROSTRO}"')
+
+    def test_con_rostro_dibuja_rectangulo_sin_texto(self):
+        negro = np.zeros((240, 320, 3), dtype=np.uint8)
+        self.detector.dibujar(negro, [(50, 50, 100, 100)])
+        self.assertTrue(negro[50, 50:150].any())  # borde superior del rectángulo
+        self.assertFalse(negro[220:, :].any())  # no aparece el texto "sin rostro"
+
+    def test_camara_entrega_jpeg_con_detector_integrado(self):
+        falsa = captura_falsa()
+        cam = Camara()
+        with patch('emociones.camera.cv2.VideoCapture', return_value=falsa):
+            cam.iniciar()
+        self.assertTrue(cam.leer_jpeg().startswith(b'\xff\xd8'))
+        cam.detener()
 
 
 class CamaraTests(SimpleTestCase):
