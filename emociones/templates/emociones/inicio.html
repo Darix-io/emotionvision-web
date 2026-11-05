@@ -22,7 +22,9 @@
           data-url-iniciar="{% url 'emociones:iniciar_camara' %}"
           data-url-video="{% url 'emociones:video' %}"
           data-url-estado="{% url 'emociones:estado' %}"
-          data-url-detener="{% url 'emociones:detener_camara' %}">
+          data-url-detener="{% url 'emociones:detener_camara' %}"
+          data-url-estadisticas="{% url 'emociones:estadisticas' %}"
+          data-url-borrar="{% url 'emociones:borrar_registros' %}">
 
         <section class="columna-video" aria-label="Video">
             <div class="visor">
@@ -47,6 +49,30 @@
         </aside>
     </main>
 
+    <section id="seccion-estadisticas" class="estadisticas" aria-label="Estadísticas">
+        <div class="estadisticas-cabecera">
+            <h2>Estadísticas</h2>
+            <button id="btn-borrar" type="button" class="boton boton-borrar">Borrar registros</button>
+        </div>
+        <p class="panel-nota">Solo se guarda la fecha, la emoción estimada y la confianza
+           (máximo un registro cada 2 segundos). No se guarda video ni imágenes.</p>
+        <p id="est-aviso" class="mensaje-error" role="alert"></p>
+        <div class="estadisticas-cuerpo">
+            <div>
+                <p class="est-total">Total de registros: <strong id="est-total">0</strong></p>
+                <h3>Por emoción</h3>
+                <ul id="est-por-emocion" class="lista-simple"><li class="vacio">Sin registros.</li></ul>
+            </div>
+            <div>
+                <h3>Últimos 10 registros</h3>
+                <table class="tabla">
+                    <thead><tr><th>Fecha</th><th>Hora</th><th>Emoción</th><th>Confianza</th></tr></thead>
+                    <tbody id="est-ultimos"><tr><td colspan="4" class="vacio">Sin registros.</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
     <footer class="aviso">
         <strong>Aviso:</strong> los resultados son estimaciones de un modelo, no un diagnóstico
         ni el estado psicológico real de una persona.
@@ -57,6 +83,7 @@
         <ul>
             <li>No se guarda video ni imágenes.</li>
             <li>No se identifica a nadie: solo se estima una emoción.</li>
+        <li>Solo se guarda la fecha, la emoción estimada y la confianza. Puedes borrarlos cuando quieras.</li>
             <li>Puedes detener la cámara en cualquier momento con el botón "Detener cámara".</li>
         </ul>
         <div class="controles">

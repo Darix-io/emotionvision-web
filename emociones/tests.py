@@ -2,12 +2,15 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 from django.contrib.staticfiles import finders
+from django.db import OperationalError
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from .camera import Camara, camara, generar_mjpeg
 from .detector import TEXTO_SIN_ROSTRO, DetectorRostros
 from .emociones import ETIQUETAS, Estimacion, EstimadorEmociones
+from .models import RegistroEmocion
+from .registro import RegistradorEmociones
 
 
 def captura_falsa(abierta=True):
@@ -168,7 +171,7 @@ class EstimadorEmocionesTests(SimpleTestCase):
 class IntegracionEtiquetasTests(SimpleTestCase):
     def _camara_con_rostro(self, estimador):
         falsa = captura_falsa()
-        cam = Camara(estimador=estimador)
+        cam = Camara(estimador=estimador, registrador=MagicMock())
         with patch('emociones.camera.cv2.VideoCapture', return_value=falsa):
             cam.iniciar()
         return cam
@@ -259,6 +262,149 @@ class EstadoPanelTests(TestCase):
         self.assertEqual(datos['rostros'], 1)
         self.assertIsNone(datos['emocion'])
         cam.detener()
+
+
+class RelojFalso:
+    """Reloj controlable para probar el límite de 1 registro cada 2 segundos."""
+
+    def __init__(self):
+        self.t = 100.0
+
+    def __call__(self):
+        return self.t
+
+
+class ModeloRegistroTests(SimpleTestCase):
+    def test_solo_guarda_datos_minimos(self):
+        campos = {c.name for c in RegistroEmocion._meta.get_fields()}
+        self.assertEqual(campos, {'id', 'fecha_hora', 'emocion', 'confianza'})
+
+
+class RegistradorTests(TestCase):
+    def setUp(self):
+        self.reloj = RelojFalso()
+        self.reg = RegistradorEmociones(reloj=self.reloj)
+        self.feliz = Estimacion('feliz', 0.82)
+
+    def test_guarda_un_registro(self):
+        self.assertTrue(self.reg.registrar(self.feliz))
+        r = RegistroEmocion.objects.get()
+        self.assertEqual(r.emocion, 'feliz')
+        self.assertAlmostEqual(r.confianza, 0.82)
+
+    def test_maximo_uno_cada_2_segundos(self):
+        self.assertTrue(self.reg.registrar(self.feliz))
+        self.reloj.t += 1.9
+        self.assertFalse(self.reg.registrar(self.feliz))
+        self.reloj.t += 0.2  # ya pasaron 2.1 s
+        self.assertTrue(self.reg.registrar(self.feliz))
+        self.assertEqual(RegistroEmocion.objects.count(), 2)
+
+    def test_sin_estimacion_no_guarda(self):
+        self.assertFalse(self.reg.registrar(None))
+        self.assertEqual(RegistroEmocion.objects.count(), 0)
+
+    def test_si_la_base_falla_no_lanza_error_y_espera_antes_de_reintentar(self):
+        with patch.object(RegistroEmocion.objects, 'create',
+                          side_effect=OperationalError('base caída')) as crear:
+            with self.assertLogs('emociones.registro', level='ERROR'):
+                self.assertFalse(self.reg.registrar(self.feliz))
+            self.reloj.t += 5
+            self.assertFalse(self.reg.registrar(self.feliz))
+            self.assertEqual(crear.call_count, 1)  # no insiste en cada fotograma
+
+
+class RegistroDesdeCamaraTests(TestCase):
+    def setUp(self):
+        self.reloj = RelojFalso()
+        estimador = MagicMock()
+        estimador.estimar.return_value = Estimacion('sorpresa', 0.7)
+        self.cam = Camara(estimador=estimador,
+                          registrador=RegistradorEmociones(reloj=self.reloj))
+        with patch('emociones.camera.cv2.VideoCapture', return_value=captura_falsa()):
+            self.cam.iniciar()
+        self.addCleanup(self.cam.detener)
+
+    def _leer(self, rostros):
+        with patch.object(self.cam.detector, 'detectar', return_value=rostros):
+            return self.cam.leer_jpeg()
+
+    def test_con_rostro_se_guarda_pero_no_en_cada_fotograma(self):
+        for _ in range(5):
+            self._leer([(10, 10, 30, 30)])
+        self.assertEqual(RegistroEmocion.objects.count(), 1)
+        self.reloj.t += 2.5
+        self._leer([(10, 10, 30, 30)])
+        self.assertEqual(RegistroEmocion.objects.count(), 2)
+
+    def test_sin_rostro_no_se_guarda(self):
+        self._leer([])
+        self.assertEqual(RegistroEmocion.objects.count(), 0)
+
+    def test_con_camara_apagada_no_se_guarda(self):
+        self.cam.detener()
+        self.assertIsNone(self.cam.leer_jpeg())
+        self.assertEqual(RegistroEmocion.objects.count(), 0)
+
+    def test_si_la_base_falla_el_video_sigue(self):
+        with patch.object(RegistroEmocion.objects, 'create',
+                          side_effect=OperationalError('base caída')):
+            with self.assertLogs('emociones.registro', level='ERROR'):
+                jpeg = self._leer([(10, 10, 30, 30)])
+        self.assertTrue(jpeg.startswith(b'\xff\xd8'))
+
+
+class VistasRegistrosTests(TestCase):
+    def test_estadisticas_vacias(self):
+        datos = self.client.get(reverse('emociones:estadisticas')).json()
+        self.assertEqual(datos, {'disponible': True, 'total': 0,
+                                 'por_emocion': [], 'ultimos': []})
+
+    def test_estadisticas_total_por_emocion_y_ultimos_10(self):
+        for i in range(12):
+            RegistroEmocion.objects.create(emocion='feliz' if i < 8 else 'enojo',
+                                           confianza=0.5)
+        datos = self.client.get(reverse('emociones:estadisticas')).json()
+        self.assertEqual(datos['total'], 12)
+        self.assertEqual(datos['por_emocion'],
+                         [{'emocion': 'feliz', 'cantidad': 8},
+                          {'emocion': 'enojo', 'cantidad': 4}])
+        self.assertEqual(len(datos['ultimos']), 10)
+        self.assertEqual(datos['ultimos'][0]['emocion'], 'enojo')  # el más reciente primero
+        self.assertEqual(datos['ultimos'][0]['confianza'], 50)
+
+    def test_estadisticas_si_la_base_falla(self):
+        with patch.object(RegistroEmocion.objects, 'values',
+                          side_effect=OperationalError('base caída')):
+            with self.assertLogs('emociones.registro', level='ERROR'):
+                respuesta = self.client.get(reverse('emociones:estadisticas'))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertFalse(respuesta.json()['disponible'])
+
+    def test_borrar_elimina_todo(self):
+        RegistroEmocion.objects.create(emocion='feliz', confianza=0.9)
+        RegistroEmocion.objects.create(emocion='miedo', confianza=0.4)
+        respuesta = self.client.post(reverse('emociones:borrar_registros'))
+        self.assertEqual(respuesta.json(), {'ok': True, 'borrados': 2})
+        self.assertEqual(RegistroEmocion.objects.count(), 0)
+
+    def test_borrar_solo_acepta_post(self):
+        self.assertEqual(self.client.get(reverse('emociones:borrar_registros')).status_code, 405)
+
+    def test_borrar_si_la_base_falla(self):
+        with patch.object(RegistroEmocion.objects, 'all',
+                          side_effect=OperationalError('base caída')):
+            with self.assertLogs('emociones.registro', level='ERROR'):
+                respuesta = self.client.post(reverse('emociones:borrar_registros'))
+        self.assertEqual(respuesta.status_code, 500)
+        self.assertFalse(respuesta.json()['ok'])
+
+    def test_pagina_tiene_seccion_de_estadisticas_y_avisos(self):
+        html = self.client.get(reverse('emociones:inicio')).content.decode()
+        self.assertIn('Borrar registros', html)
+        self.assertIn('Últimos 10 registros', html)
+        self.assertIn('No se guarda video ni imágenes', html)
+        self.assertIn('no un diagnóstico', html)
 
 
 class CamaraTests(SimpleTestCase):

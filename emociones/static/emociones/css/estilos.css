@@ -122,6 +122,28 @@ h1 { margin: 0; font-size: 1.8rem; }
 .panel-confianza, .panel-rostros { margin: 0.5rem 0 0; }
 .panel-nota { margin: 1rem 0 0; font-size: 0.85rem; color: var(--suave); }
 
+/* Estadísticas */
+.estadisticas {
+    max-width: 1000px;
+    margin: 1.5rem auto 0;
+    padding: 1rem 1.25rem;
+    background: var(--tarjeta);
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+}
+.estadisticas-cabecera { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.estadisticas h2 { margin: 0; font-size: 1.2rem; }
+.estadisticas h3 { font-size: 1rem; color: var(--suave); margin: 1rem 0 0.4rem; }
+.estadisticas-cuerpo { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); gap: 1.5rem; }
+@media (max-width: 760px) { .estadisticas-cuerpo { grid-template-columns: 1fr; } }
+.est-total { margin: 0.75rem 0 0; }
+.lista-simple { list-style: none; margin: 0; padding: 0; }
+.lista-simple li { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid var(--borde); }
+.tabla { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.tabla th, .tabla td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--borde); }
+.vacio { color: var(--suave); }
+.boton-borrar { background: #6b7280; padding: 0.5rem 1rem; }
+
 .aviso {
     background: var(--aviso-fondo);
     border-left: 4px solid var(--aviso-borde);

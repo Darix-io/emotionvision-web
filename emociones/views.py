@@ -2,6 +2,7 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 
+from . import registro
 from .camera import camara, generar_mjpeg
 
 
@@ -39,6 +40,22 @@ def video(request):
 def estado(request):
     """Estado actual para el panel: cámara y emoción estimada (solo en memoria)."""
     return JsonResponse(camara.estado())
+
+
+@require_GET
+def estadisticas(request):
+    """Total, cantidad por emoción y últimos registros."""
+    return JsonResponse(registro.estadisticas())
+
+
+@require_POST
+def borrar_registros(request):
+    """Elimina todos los registros guardados."""
+    borrados = registro.borrar_registros()
+    if borrados is None:
+        return JsonResponse(
+            {'ok': False, 'mensaje': 'No se pudieron borrar los registros.'}, status=500)
+    return JsonResponse({'ok': True, 'borrados': borrados})
 
 
 @require_POST

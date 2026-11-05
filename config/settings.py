@@ -84,6 +84,8 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD', ''),
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
+        # Si PostgreSQL no responde, no se deja colgado el video más de 3 s.
+        'OPTIONS': {'connect_timeout': 3},
     }
 }
 

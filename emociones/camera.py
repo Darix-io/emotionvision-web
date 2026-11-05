@@ -6,6 +6,7 @@ import cv2
 
 from .detector import DetectorRostros
 from .emociones import EstimadorEmociones
+from .registro import RegistradorEmociones
 
 SIN_DATOS = {'rostros': 0, 'emocion': None, 'confianza': None}
 
@@ -13,10 +14,11 @@ SIN_DATOS = {'rostros': 0, 'emocion': None, 'confianza': None}
 class Camara:
     """Abre la cámara, entrega fotogramas JPEG y la libera al detener."""
 
-    def __init__(self, indice=0, detector=None, estimador=None):
+    def __init__(self, indice=0, detector=None, estimador=None, registrador=None):
         self.indice = indice
         self.detector = detector or DetectorRostros()
         self.estimador = estimador or EstimadorEmociones()
+        self.registrador = registrador or RegistradorEmociones()
         self._captura = None
         self._ultimo = dict(SIN_DATOS)
         self._lock = threading.Lock()
@@ -37,6 +39,7 @@ class Camara:
                 captura.release()
                 return False
             self._captura = captura
+            self.registrador.reiniciar()
             return True
 
     def _estimaciones(self, fotograma, rostros):
@@ -59,6 +62,8 @@ class Camara:
             'emocion': principal.emocion if principal else None,
             'confianza': round(principal.confianza * 100) if principal else None,
         }
+        # Guarda solo el dato mínimo (y como máximo uno cada 2 s). Nunca rompe el video.
+        self.registrador.registrar(principal)
 
     def estado(self):
         """Datos para el panel: cámara, cantidad de rostros y emoción actual."""

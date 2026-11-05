@@ -7,6 +7,8 @@
         video: app.dataset.urlVideo,
         estado: app.dataset.urlEstado,
         detener: app.dataset.urlDetener,
+        estadisticas: app.dataset.urlEstadisticas,
+        borrar: app.dataset.urlBorrar,
     };
     const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
@@ -20,6 +22,7 @@
     const insignia = $('estado-camara');
 
     let temporizador = null;
+    let consultas = 0;
 
     function post(url) {
         return fetch(url, { method: 'POST', headers: { 'X-CSRFToken': csrf } });
@@ -60,6 +63,78 @@
         }
     }
 
+    // ----- Estadísticas -----
+    function celda(texto, columnas) {
+        const td = document.createElement('td');
+        td.textContent = texto;  // textContent: nunca se interpreta como HTML
+        if (columnas) { td.colSpan = columnas; td.className = 'vacio'; }
+        return td;
+    }
+
+    function pintarEstadisticas(datos) {
+        $('est-aviso').textContent = datos.disponible
+            ? '' : 'No se pudo consultar la base de datos. El video sigue funcionando.';
+        $('est-total').textContent = datos.total;
+
+        const lista = $('est-por-emocion');
+        lista.replaceChildren();
+        if (datos.por_emocion.length === 0) {
+            const li = document.createElement('li');
+            li.className = 'vacio';
+            li.textContent = 'Sin registros.';
+            lista.appendChild(li);
+        }
+        datos.por_emocion.forEach((e) => {
+            const li = document.createElement('li');
+            const nombre = document.createElement('span');
+            nombre.textContent = capitalizar(e.emocion);
+            const cantidad = document.createElement('strong');
+            cantidad.textContent = e.cantidad;
+            li.append(nombre, cantidad);
+            lista.appendChild(li);
+        });
+
+        const cuerpo = $('est-ultimos');
+        cuerpo.replaceChildren();
+        if (datos.ultimos.length === 0) {
+            const tr = document.createElement('tr');
+            tr.appendChild(celda('Sin registros.', 4));
+            cuerpo.appendChild(tr);
+        }
+        datos.ultimos.forEach((r) => {
+            const tr = document.createElement('tr');
+            tr.append(celda(r.fecha), celda(r.hora), celda(capitalizar(r.emocion)),
+                      celda(r.confianza + '%'));
+            cuerpo.appendChild(tr);
+        });
+    }
+
+    async function cargarEstadisticas() {
+        try {
+            const resp = await fetch(urls.estadisticas, { cache: 'no-store' });
+            pintarEstadisticas(await resp.json());
+        } catch (e) {
+            $('est-aviso').textContent = 'No se pudieron cargar las estadísticas.';
+        }
+    }
+
+    $('btn-borrar').addEventListener('click', async () => {
+        if (!window.confirm('¿Borrar todos los registros guardados? Esta acción no se puede deshacer.')) {
+            return;
+        }
+        try {
+            const resp = await post(urls.borrar);
+            if (!resp.ok) {
+                $('est-aviso').textContent = 'No se pudieron borrar los registros.';
+                return;
+            }
+        } catch (e) {
+            $('est-aviso').textContent = 'No se pudo comunicar con el servidor.';
+            return;
+        }
+        cargarEstadisticas();
+    });
+
     function mostrarApagada() {
         clearInterval(temporizador);
         temporizador = null;
@@ -70,6 +145,7 @@
         btnDetener.disabled = true;
         pintarEstadoCamara(false);
         pintarPanel(null);
+        cargarEstadisticas();
     }
 
     function mostrarEncendida() {
@@ -93,6 +169,8 @@
                 return;
             }
             pintarPanel(datos);
+            consultas += 1;
+            if (consultas % 4 === 0) cargarEstadisticas();  // cada ~2 s
         } catch (e) {
             /* un fallo puntual no detiene el video */
         }
