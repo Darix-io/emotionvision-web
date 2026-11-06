@@ -44,6 +44,27 @@ class InicioTests(TestCase):
         self.assertIn('no un diagnóstico', html)
         self.assertIn('Aceptar y encender', html)
 
+    def test_interfaz_sin_recursos_externos(self):
+        """La interfaz no carga fuentes, íconos ni scripts de internet."""
+        contenidos = [self.client.get(reverse('emociones:inicio')).content.decode()]
+        for ruta in ('emociones/css/estilos.css', 'emociones/js/app.js'):
+            contenidos.append(Path(finders.find(ruta)).read_text(encoding='utf-8'))
+        for texto in contenidos:
+            self.assertNotIn('http://', texto)
+            self.assertNotIn('https://', texto)
+            self.assertNotIn('@import', texto)
+
+    def test_interfaz_tiene_elementos_de_accesibilidad(self):
+        html = self.client.get(reverse('emociones:inicio')).content.decode()
+        self.assertIn('Saltar al contenido', html)
+        self.assertIn('role="progressbar"', html)
+        self.assertIn('aria-live="polite"', html)
+        self.assertIn('<main', html)
+        self.assertIn('lang="es"', html)
+        css = Path(finders.find('emociones/css/estilos.css')).read_text(encoding='utf-8')
+        self.assertIn(':focus-visible', css)
+        self.assertIn('prefers-reduced-motion', css)
+
     def test_archivos_estaticos_existen(self):
         for ruta in ('emociones/css/estilos.css', 'emociones/js/app.js'):
             self.assertIsNotNone(finders.find(ruta), ruta)

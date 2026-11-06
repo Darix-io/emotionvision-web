@@ -21,8 +21,20 @@
     const dialogo = $('dlg-privacidad');
     const insignia = $('estado-camara');
 
+    // Emoji por emoción (solo presentación). Son emojis del sistema: no se carga nada de internet.
+    const EMOJIS = {
+        neutral: '😐', feliz: '😄', sorpresa: '😮', tristeza: '😢',
+        enojo: '😠', asco: '🤢', miedo: '😨', desprecio: '😏',
+    };
+    const EMOJI_APAGADA = '😴';
+    const EMOJI_SIN_ROSTRO = '🔎';
+    const EMOJI_SIN_ESTIMACION = '🙂';
+
     let temporizador = null;
     let consultas = 0;
+    let ultimoAnuncio = '';
+    let ultimoEmoji = '';
+    let firmaEstadisticas = '';
 
     function post(url) {
         return fetch(url, { method: 'POST', headers: { 'X-CSRFToken': csrf } });
@@ -32,35 +44,71 @@
         return texto.charAt(0).toUpperCase() + texto.slice(1);
     }
 
+    function emojiDe(emocion) {
+        return EMOJIS[emocion] || EMOJI_SIN_ESTIMACION;
+    }
+
+    // Lectores de pantalla: solo se avisa cuando algo cambia (no cada 0,5 s).
+    function anunciar(texto) {
+        if (texto === ultimoAnuncio) return;
+        ultimoAnuncio = texto;
+        $('anuncio').textContent = texto;
+    }
+
     function pintarEstadoCamara(encendida) {
         insignia.classList.toggle('estado-encendida', encendida);
         insignia.classList.toggle('estado-apagada', !encendida);
         $('estado-texto').textContent = encendida ? 'Cámara encendida' : 'Cámara apagada';
     }
 
+    // ----- Panel de emoción actual -----
     function pintarPanel(datos) {
-        const emocion = $('panel-emocion');
+        const barra = $('barra');
         const relleno = $('barra-relleno');
         const confianza = $('panel-confianza');
-        $('panel-rostros').textContent = 'Rostros detectados: ' + (datos ? datos.rostros : 0);
+        const rostros = datos ? datos.rostros : 0;
+        let emoji, titulo, porcentaje = null, nota = '';
 
         if (!datos || !datos.activa) {
-            emocion.textContent = '—';
-            confianza.textContent = 'Confianza: —';
-            relleno.style.width = '0';
+            emoji = EMOJI_APAGADA;
+            titulo = '—';
         } else if (datos.rostros === 0) {
-            emocion.textContent = 'Sin rostro detectado';
-            confianza.textContent = 'Confianza: —';
-            relleno.style.width = '0';
+            emoji = EMOJI_SIN_ROSTRO;
+            titulo = 'Sin rostro detectado';
         } else if (datos.emocion) {
-            emocion.textContent = capitalizar(datos.emocion);
-            confianza.textContent = 'Confianza: ' + datos.confianza + '%';
-            relleno.style.width = datos.confianza + '%';
+            emoji = emojiDe(datos.emocion);
+            titulo = capitalizar(datos.emocion);
+            porcentaje = datos.confianza;
         } else {
-            emocion.textContent = 'Rostro detectado';
-            confianza.textContent = 'Sin estimación disponible (¿falta el modelo?)';
-            relleno.style.width = '0';
+            emoji = EMOJI_SIN_ESTIMACION;
+            titulo = 'Rostro detectado';
+            nota = ' · sin estimación disponible (¿falta el modelo?)';
         }
+
+        const nodoEmoji = $('panel-emoji');
+        if (emoji !== ultimoEmoji) {
+            nodoEmoji.textContent = emoji;
+            nodoEmoji.classList.remove('cambio');
+            void nodoEmoji.offsetWidth;  // reinicia la animación
+            nodoEmoji.classList.add('cambio');
+            ultimoEmoji = emoji;
+        }
+        $('panel-emocion').textContent = titulo;
+        $('panel-rostros').textContent = 'Rostros detectados: ' + rostros + nota;
+
+        if (porcentaje === null) {
+            confianza.textContent = '—';
+            relleno.style.width = '0';
+            barra.removeAttribute('aria-valuenow');
+            barra.setAttribute('aria-valuetext', 'Sin dato');
+        } else {
+            confianza.textContent = porcentaje + '%';
+            relleno.style.width = porcentaje + '%';
+            barra.setAttribute('aria-valuenow', porcentaje);
+            barra.setAttribute('aria-valuetext', porcentaje + '%');
+        }
+
+        anunciar(!datos || !datos.activa ? '' : titulo + (porcentaje === null ? '' : ', ' + porcentaje + '%'));
     }
 
     // ----- Estadísticas -----
@@ -71,28 +119,100 @@
         return td;
     }
 
-    function pintarEstadisticas(datos) {
-        $('est-aviso').textContent = datos.disponible
-            ? '' : 'No se pudo consultar la base de datos. El video sigue funcionando.';
-        $('est-total').textContent = datos.total;
+    function celdaEmocion(emocion) {
+        const td = document.createElement('td');
+        const icono = document.createElement('span');
+        icono.className = 'emoji';
+        icono.setAttribute('aria-hidden', 'true');
+        icono.textContent = emojiDe(emocion);
+        td.append(icono, document.createTextNode(capitalizar(emocion)));
+        return td;
+    }
 
+    function celdaConfianza(porcentaje) {
+        const td = document.createElement('td');
+        const pastilla = document.createElement('span');
+        pastilla.className = 'pastilla';
+        pastilla.textContent = porcentaje + '%';
+        td.appendChild(pastilla);
+        return td;
+    }
+
+    function filaBarra(e) {
+        const li = document.createElement('li');
+        li.className = 'barra-fila';
+        li.dataset.emocion = e.emocion;
+
+        const nombre = document.createElement('span');
+        nombre.className = 'barra-nombre';
+        const icono = document.createElement('span');
+        icono.className = 'emoji';
+        icono.setAttribute('aria-hidden', 'true');
+        icono.textContent = emojiDe(e.emocion);
+        nombre.append(icono, document.createTextNode(capitalizar(e.emocion)));
+
+        const pista = document.createElement('span');
+        pista.className = 'barra-pista';
+        pista.setAttribute('aria-hidden', 'true');
+        const valor = document.createElement('span');
+        valor.className = 'barra-valor';
+        valor.style.width = '0';
+        pista.appendChild(valor);
+
+        const cifra = document.createElement('span');
+        cifra.className = 'barra-cifra';
+        cifra.append(document.createElement('strong'), document.createElement('small'));
+
+        li.append(nombre, pista, cifra);
+        return li;
+    }
+
+    function actualizarFilaBarra(li, e, maximo, total) {
+        li.querySelector('.barra-valor').style.width = Math.round((e.cantidad / maximo) * 100) + '%';
+        li.querySelector('strong').textContent = e.cantidad;
+        li.querySelector('small').textContent = Math.round((e.cantidad / total) * 100) + '%';
+    }
+
+    function pintarBarras(datos) {
         const lista = $('est-por-emocion');
-        lista.replaceChildren();
+        const claves = datos.por_emocion.map((e) => e.emocion).join();
+        const actuales = Array.from(lista.querySelectorAll('.barra-fila')).map((li) => li.dataset.emocion).join();
+
         if (datos.por_emocion.length === 0) {
             const li = document.createElement('li');
             li.className = 'vacio';
             li.textContent = 'Sin registros.';
-            lista.appendChild(li);
+            lista.replaceChildren(li);
+            return;
         }
-        datos.por_emocion.forEach((e) => {
-            const li = document.createElement('li');
-            const nombre = document.createElement('span');
-            nombre.textContent = capitalizar(e.emocion);
-            const cantidad = document.createElement('strong');
-            cantidad.textContent = e.cantidad;
-            li.append(nombre, cantidad);
-            lista.appendChild(li);
-        });
+
+        const maximo = Math.max(...datos.por_emocion.map((e) => e.cantidad));
+        if (claves !== actuales) {
+            // Cambió el orden o las emociones: se rehacen las filas (y las barras crecen con animación).
+            const filas = datos.por_emocion.map(filaBarra);
+            lista.replaceChildren(...filas);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                filas.forEach((li, i) => actualizarFilaBarra(li, datos.por_emocion[i], maximo, datos.total));
+            }));
+        } else {
+            // Mismo orden: se actualiza en el lugar para que las barras se muevan suavemente.
+            lista.querySelectorAll('.barra-fila').forEach((li, i) => {
+                actualizarFilaBarra(li, datos.por_emocion[i], maximo, datos.total);
+            });
+        }
+    }
+
+    function pintarEstadisticas(datos) {
+        $('est-aviso').textContent = datos.disponible
+            ? '' : 'No se pudo consultar la base de datos. El video sigue funcionando.';
+
+        // Si nada cambió, no se toca la página (evita parpadeos y avisos repetidos).
+        const firma = JSON.stringify(datos);
+        if (firma === firmaEstadisticas) return;
+        firmaEstadisticas = firma;
+
+        $('est-total').textContent = datos.total;
+        pintarBarras(datos);
 
         const cuerpo = $('est-ultimos');
         cuerpo.replaceChildren();
@@ -103,8 +223,7 @@
         }
         datos.ultimos.forEach((r) => {
             const tr = document.createElement('tr');
-            tr.append(celda(r.fecha), celda(r.hora), celda(capitalizar(r.emocion)),
-                      celda(r.confianza + '%'));
+            tr.append(celda(r.fecha), celda(r.hora), celdaEmocion(r.emocion), celdaConfianza(r.confianza));
             cuerpo.appendChild(tr);
         });
     }
@@ -135,12 +254,13 @@
         cargarEstadisticas();
     });
 
+    // ----- Cámara -----
     function mostrarApagada() {
         clearInterval(temporizador);
         temporizador = null;
         video.removeAttribute('src');
         video.style.display = 'none';
-        espera.style.display = 'block';
+        espera.style.display = 'flex';
         btnIniciar.disabled = false;
         btnDetener.disabled = true;
         pintarEstadoCamara(false);
@@ -185,12 +305,15 @@
             if (!resp.ok || !datos.ok) {
                 mensaje.textContent = datos.mensaje || 'No se pudo iniciar la cámara.';
                 mostrarApagada();
+                btnIniciar.focus();
                 return;
             }
             mostrarEncendida();
+            btnDetener.focus();  // el foco pasa al botón que ahora se puede usar
         } catch (e) {
             mensaje.textContent = 'No se pudo comunicar con el servidor.';
             mostrarApagada();
+            btnIniciar.focus();
         }
     }
 
@@ -208,6 +331,7 @@
             await post(urls.detener);
         } finally {
             mostrarApagada();
+            btnIniciar.focus();
         }
     });
 

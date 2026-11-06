@@ -3,22 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
     <title>EmotionVision Web</title>
     <link rel="stylesheet" href="{% static 'emociones/css/estilos.css' %}">
 </head>
 <body>
+    <a class="saltar" href="#app">Saltar al contenido</a>
+
     <header class="cabecera">
-        <div>
-            <h1>EmotionVision Web</h1>
-            <p class="subtitulo">Detecta rostros con la cámara y muestra una <strong>estimación</strong> de emociones.</p>
+        <div class="marca">
+            <svg class="logo" viewBox="0 0 48 48" width="44" height="44" aria-hidden="true" focusable="false">
+                <rect width="48" height="48" rx="14" fill="currentColor"/>
+                <path d="M14 20v-4a2 2 0 0 1 2-2h4M28 14h4a2 2 0 0 1 2 2v4M34 28v4a2 2 0 0 1-2 2h-4M20 34h-4a2 2 0 0 1-2-2v-4"
+                      fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+                <circle cx="20.5" cy="22.5" r="1.7" fill="#fff"/>
+                <circle cx="27.5" cy="22.5" r="1.7" fill="#fff"/>
+                <path d="M19.5 28c1.2 1.6 2.8 2.4 4.5 2.4s3.3-.8 4.5-2.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+            <div>
+                <h1>EmotionVision Web</h1>
+                <p class="subtitulo">Detecta rostros y muestra una <strong>estimación</strong> de emociones.</p>
+            </div>
         </div>
-        <div id="estado-camara" class="estado estado-apagada" role="status" aria-live="polite">
-            <span class="punto"></span>
+        <div id="estado-camara" class="estado estado-apagada">
+            <span class="punto" aria-hidden="true"></span>
             <span id="estado-texto">Cámara apagada</span>
         </div>
     </header>
 
-    <main id="app" class="contenido"
+    <main id="app" class="contenido" tabindex="-1"
           data-url-iniciar="{% url 'emociones:iniciar_camara' %}"
           data-url-video="{% url 'emociones:video' %}"
           data-url-estado="{% url 'emociones:estado' %}"
@@ -26,68 +39,96 @@
           data-url-estadisticas="{% url 'emociones:estadisticas' %}"
           data-url-borrar="{% url 'emociones:borrar_registros' %}">
 
-        <section class="columna-video" aria-label="Video">
-            <div class="visor">
-                <span id="espera" class="espera">La cámara está apagada.</span>
-                <img id="video" alt="Video de la cámara con los rostros detectados">
+        <div class="rejilla">
+            <section class="tarjeta tarjeta-video" aria-labelledby="titulo-video">
+                <h2 id="titulo-video" class="solo-lectores">Video de la cámara</h2>
+                <div class="marco">
+                    <div class="visor">
+                        <div id="espera" class="espera">
+                            <svg class="espera-icono" viewBox="0 0 64 64" width="72" height="72" aria-hidden="true" focusable="false">
+                                <path d="M10 22a4 4 0 0 1 4-4h8l3-5h14l3 5h8a4 4 0 0 1 4 4v24a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4z"
+                                      fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+                                <circle cx="32" cy="34" r="9" fill="none" stroke="currentColor" stroke-width="3"/>
+                                <path d="M8 56 56 8" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+                            </svg>
+                            <p class="espera-titulo">La cámara está apagada.</p>
+                            <p class="espera-ayuda">Pulsa «Iniciar cámara» para comenzar.</p>
+                        </div>
+                        <img id="video" alt="Video de la cámara con los rostros detectados">
+                    </div>
+                </div>
+                <div class="controles">
+                    <button id="btn-iniciar" type="button" class="boton boton-principal">Iniciar cámara</button>
+                    <button id="btn-detener" type="button" class="boton boton-peligro" disabled>Detener cámara</button>
+                </div>
+                <p id="mensaje" class="mensaje-error" role="alert"></p>
+            </section>
+
+            <aside class="tarjeta tarjeta-panel" aria-labelledby="titulo-panel">
+                <h2 id="titulo-panel" class="titulo-tarjeta">Emoción estimada</h2>
+                <div id="panel-emoji" class="panel-emoji" aria-hidden="true">😴</div>
+                <p id="panel-emocion" class="panel-emocion">—</p>
+                <div class="confianza-cabecera">
+                    <span>Confianza</span>
+                    <strong id="panel-confianza">—</strong>
+                </div>
+                <div id="barra" class="barra" role="progressbar" aria-label="Confianza de la estimación"
+                     aria-valuemin="0" aria-valuemax="100" aria-valuetext="Sin dato">
+                    <div id="barra-relleno" class="barra-relleno"></div>
+                </div>
+                <p id="panel-rostros" class="panel-rostros">Rostros detectados: 0</p>
+                <p class="panel-nota">Es una estimación del modelo. Puede equivocarse según la iluminación,
+                   la posición y la cámara.</p>
+            </aside>
+        </div>
+
+        <section id="seccion-estadisticas" class="tarjeta estadisticas" aria-labelledby="titulo-estadisticas">
+            <div class="estadisticas-cabecera">
+                <div>
+                    <h2 id="titulo-estadisticas" class="titulo-tarjeta">Estadísticas</h2>
+                    <p class="nota">Solo se guarda la fecha, la emoción estimada y la confianza
+                       (máximo un registro cada 2 segundos). No se guarda video ni imágenes.</p>
+                </div>
+                <button id="btn-borrar" type="button" class="boton boton-secundario">Borrar registros</button>
             </div>
-            <div class="controles">
-                <button id="btn-iniciar" type="button" class="boton boton-iniciar">Iniciar cámara</button>
-                <button id="btn-detener" type="button" class="boton boton-detener" disabled>Detener cámara</button>
+            <p id="est-aviso" class="mensaje-error" role="alert"></p>
+
+            <div class="estadisticas-cuerpo">
+                <div class="est-columna">
+                    <p class="est-total"><span id="est-total">0</span><span class="est-total-texto">registros en total</span></p>
+                    <h3>Cantidad por emoción</h3>
+                    <ul id="est-por-emocion" class="barras"><li class="vacio">Sin registros.</li></ul>
+                </div>
+                <div class="est-columna">
+                    <h3>Últimos 10 registros</h3>
+                    <div class="tabla-envoltorio" role="region" aria-label="Tabla de los últimos 10 registros" tabindex="0">
+                        <table class="tabla">
+                            <thead><tr><th scope="col">Fecha</th><th scope="col">Hora</th><th scope="col">Emoción</th><th scope="col">Confianza</th></tr></thead>
+                            <tbody id="est-ultimos"><tr><td colspan="4" class="vacio">Sin registros.</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-            <p id="mensaje" class="mensaje-error" role="alert"></p>
         </section>
-
-        <aside class="panel" aria-label="Resultado estimado">
-            <h2>Emoción estimada</h2>
-            <p id="panel-emocion" class="panel-emocion">—</p>
-            <div class="barra" aria-hidden="true"><div id="barra-relleno" class="barra-relleno"></div></div>
-            <p id="panel-confianza" class="panel-confianza">Confianza: —</p>
-            <p id="panel-rostros" class="panel-rostros">Rostros detectados: 0</p>
-            <p class="panel-nota">Es una estimación del modelo. Puede equivocarse según la iluminación,
-               la posición y la cámara.</p>
-        </aside>
     </main>
-
-    <section id="seccion-estadisticas" class="estadisticas" aria-label="Estadísticas">
-        <div class="estadisticas-cabecera">
-            <h2>Estadísticas</h2>
-            <button id="btn-borrar" type="button" class="boton boton-borrar">Borrar registros</button>
-        </div>
-        <p class="panel-nota">Solo se guarda la fecha, la emoción estimada y la confianza
-           (máximo un registro cada 2 segundos). No se guarda video ni imágenes.</p>
-        <p id="est-aviso" class="mensaje-error" role="alert"></p>
-        <div class="estadisticas-cuerpo">
-            <div>
-                <p class="est-total">Total de registros: <strong id="est-total">0</strong></p>
-                <h3>Por emoción</h3>
-                <ul id="est-por-emocion" class="lista-simple"><li class="vacio">Sin registros.</li></ul>
-            </div>
-            <div>
-                <h3>Últimos 10 registros</h3>
-                <table class="tabla">
-                    <thead><tr><th>Fecha</th><th>Hora</th><th>Emoción</th><th>Confianza</th></tr></thead>
-                    <tbody id="est-ultimos"><tr><td colspan="4" class="vacio">Sin registros.</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-    </section>
 
     <footer class="aviso">
         <strong>Aviso:</strong> los resultados son estimaciones de un modelo, no un diagnóstico
         ni el estado psicológico real de una persona.
     </footer>
 
+    <p id="anuncio" class="solo-lectores" role="status" aria-live="polite"></p>
+
     <dialog id="dlg-privacidad" class="dialogo" aria-labelledby="dlg-titulo">
-        <h2 id="dlg-titulo">Antes de encender la cámara</h2>
+        <h2 id="dlg-titulo"><span aria-hidden="true">🔒</span> Antes de encender la cámara</h2>
         <ul>
             <li>No se guarda video ni imágenes.</li>
             <li>No se identifica a nadie: solo se estima una emoción.</li>
-        <li>Solo se guarda la fecha, la emoción estimada y la confianza. Puedes borrarlos cuando quieras.</li>
+            <li>Solo se guarda la fecha, la emoción estimada y la confianza. Puedes borrarlos cuando quieras.</li>
             <li>Puedes detener la cámara en cualquier momento con el botón "Detener cámara".</li>
         </ul>
-        <div class="controles">
-            <button id="dlg-aceptar" type="button" class="boton boton-iniciar">Aceptar y encender</button>
+        <div class="controles controles-dialogo">
+            <button id="dlg-aceptar" type="button" class="boton boton-principal">Aceptar y encender</button>
             <button id="dlg-cancelar" type="button" class="boton boton-secundario">Cancelar</button>
         </div>
     </dialog>
