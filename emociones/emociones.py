@@ -21,15 +21,45 @@ ETIQUETAS = ('neutral', 'feliz', 'sorpresa', 'tristeza',
 TAMANO = 64  # el modelo recibe imágenes grises de 64x64
 
 
+CANTIDAD_TOP = 3
+
+
+def porcentajes_enteros(probabilidades):
+    """Convierte probabilidades (de mayor a menor) en porcentajes enteros que suman <= 100.
+
+    La primera se redondea (así coincide con 'Feliz 82%'); las demás se truncan y se
+    limitan a lo que falta para 100, para que el redondeo nunca pase de 100 en total.
+    """
+    if not probabilidades:
+        return []
+    primero = round(probabilidades[0] * 100)
+    restante = 100 - primero
+    porcentajes = [primero]
+    for p in probabilidades[1:]:
+        valor = max(0, min(int(p * 100), restante))
+        porcentajes.append(valor)
+        restante -= valor
+    return porcentajes
+
+
 @dataclass(frozen=True)
 class Estimacion:
     emocion: str
     confianza: float  # entre 0 y 1
+    # Las más probables, de mayor a menor: ((emocion, probabilidad), ...). Puede ir vacío.
+    top: tuple = ()
 
     @property
     def texto(self):
         """Ejemplo: 'Feliz 82%'."""
         return f'{self.emocion.capitalize()} {round(self.confianza * 100)}%'
+
+    @property
+    def top3(self):
+        """Ejemplo: [{'emocion': 'feliz', 'porcentaje': 82}, ...]. Vacío si no hay datos."""
+        porcentajes = porcentajes_enteros([p for _, p in self.top])
+        return [{'emocion': e, 'porcentaje': pct}
+                for (e, _), pct in zip(self.top, porcentajes)]
 
 
 class EstimadorEmociones:
@@ -77,8 +107,10 @@ class EstimadorEmociones:
                 return None
             exp = np.exp(logits - logits.max())
             prob = exp / exp.sum()
-            i = int(prob.argmax())
-            return Estimacion(ETIQUETAS[i], float(prob[i]))
+            orden = np.argsort(-prob, kind='stable')[:CANTIDAD_TOP]  # de mayor a menor
+            top = tuple((ETIQUETAS[j], float(prob[j])) for j in orden)
+            i = int(orden[0])
+            return Estimacion(ETIQUETAS[i], float(prob[i]), top)
         except Exception:
             logger.exception('Falló la estimación de emoción')
             return None

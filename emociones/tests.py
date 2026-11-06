@@ -11,7 +11,7 @@ from django.urls import reverse
 
 from .camera import Camara, camara, generar_mjpeg
 from .detector import TEXTO_SIN_ROSTRO, DetectorRostros
-from .emociones import ETIQUETAS, Estimacion, EstimadorEmociones
+from .emociones import ETIQUETAS, Estimacion, EstimadorEmociones, porcentajes_enteros
 from .models import RegistroEmocion
 from .registro import RegistradorEmociones, borrar_registros, estadisticas
 
@@ -236,7 +236,7 @@ class EstadoPanelTests(TestCase):
     def test_estado_con_camara_apagada(self):
         datos = self.client.get(reverse('emociones:estado')).json()
         self.assertEqual(datos, {'activa': False, 'rostros': 0,
-                                 'emocion': None, 'confianza': None})
+                                 'emocion': None, 'confianza': None, 'top3': []})
 
     def test_estado_solo_acepta_get(self):
         self.assertEqual(self.client.post(reverse('emociones:estado')).status_code, 405)
@@ -258,8 +258,8 @@ class EstadoPanelTests(TestCase):
             cam.iniciar()
         with patch.object(cam.detector, 'detectar', return_value=[(10, 10, 30, 30)]):
             cam.leer_jpeg()
-        self.assertEqual(cam.estado(), {'activa': True, 'rostros': 1,
-                                        'emocion': 'feliz', 'confianza': 82})
+        self.assertEqual(cam.estado(), {'activa': True, 'rostros': 1, 'emocion': 'feliz',
+                                        'confianza': 82, 'top3': []})  # el simulado no trae top
         cam.detener()
         self.assertFalse(cam.estado()['activa'])
         self.assertIsNone(cam.estado()['emocion'])
@@ -568,7 +568,8 @@ class CamaraCasosBordeTests(SimpleTestCase):
 
     def test_estado_apagada(self):
         self.assertEqual(Camara(registrador=MagicMock()).estado(),
-                         {'activa': False, 'rostros': 0, 'emocion': None, 'confianza': None})
+                         {'activa': False, 'rostros': 0, 'emocion': None,
+                          'confianza': None, 'top3': []})
 
     def test_flujo_sin_camara_encendida_no_entrega_nada(self):
         cam = Camara(registrador=MagicMock())
@@ -648,6 +649,187 @@ class VistasCasosBordeTests(TestCase):
         datos = self.client.get(reverse('emociones:video')).json()
         self.assertFalse(datos['ok'])
         self.assertIn('no está iniciada', datos['mensaje'])
+
+
+def sesion_con_logits(logits):
+    """Sesión simulada que devuelve los logits indicados (8 valores)."""
+    sesion = sesion_falsa()
+    sesion.run.return_value = [np.array([logits], dtype=np.float32)]
+    return sesion
+
+
+RECORTE = np.full((64, 64), 120, dtype=np.uint8)
+
+
+class Top3EstimadorTests(SimpleTestCase):
+    def test_top3_ordenado_de_mayor_a_menor(self):
+        # feliz (1) > sorpresa (2) > enojo (4)
+        sesion = sesion_con_logits([0.1, 3.0, 2.0, 0.0, 1.0, -1.0, -2.0, -3.0])
+        resultado = EstimadorEmociones(sesion=sesion).estimar(RECORTE)
+        self.assertEqual([e for e, _ in resultado.top], ['feliz', 'sorpresa', 'enojo'])
+        probabilidades = [p for _, p in resultado.top]
+        self.assertEqual(probabilidades, sorted(probabilidades, reverse=True))
+        self.assertEqual(len(resultado.top), 3)
+
+    def test_lo_anterior_no_cambia(self):
+        sesion = sesion_con_logits([0.1, 3.0, 2.0, 0.0, 1.0, -1.0, -2.0, -3.0])
+        resultado = EstimadorEmociones(sesion=sesion).estimar(RECORTE)
+        self.assertEqual(resultado.emocion, 'feliz')
+        self.assertEqual(resultado.confianza, resultado.top[0][1])
+        self.assertRegex(resultado.texto, r'^Feliz \d+%$')
+
+    def test_top3_en_porcentajes_enteros_y_en_espanol(self):
+        sesion = sesion_con_logits([0.1, 3.0, 2.0, 0.0, 1.0, -1.0, -2.0, -3.0])
+        top3 = EstimadorEmociones(sesion=sesion).estimar(RECORTE).top3
+        self.assertEqual(len(top3), 3)
+        self.assertTrue(all(t['emocion'] in ETIQUETAS for t in top3))
+        self.assertTrue(all(type(t['porcentaje']) is int for t in top3))
+        porcentajes = [t['porcentaje'] for t in top3]
+        self.assertEqual(porcentajes, sorted(porcentajes, reverse=True))
+
+    def test_el_primero_coincide_con_el_texto_principal(self):
+        sesion = sesion_con_logits([0.1, 3.0, 2.0, 0.0, 1.0, -1.0, -2.0, -3.0])
+        resultado = EstimadorEmociones(sesion=sesion).estimar(RECORTE)
+        self.assertEqual(resultado.texto, f"Feliz {resultado.top3[0]['porcentaje']}%")
+
+    def test_la_suma_nunca_pasa_de_100_con_muchos_casos(self):
+        azar = np.random.default_rng(7)
+        for _ in range(300):
+            logits = list(azar.normal(0, azar.choice([0.1, 1, 5, 20]), 8))
+            resultado = EstimadorEmociones(sesion=sesion_con_logits(logits)).estimar(RECORTE)
+            porcentajes = [t['porcentaje'] for t in resultado.top3]
+            self.assertLessEqual(sum(porcentajes), 100, porcentajes)
+            self.assertTrue(all(0 <= p <= 100 for p in porcentajes))
+            self.assertEqual(porcentajes, sorted(porcentajes, reverse=True))
+
+    def test_casos_limite_de_redondeo(self):
+        self.assertEqual(porcentajes_enteros([0.996, 0.0039, 0.0001]), [100, 0, 0])
+        self.assertEqual(porcentajes_enteros([0.5, 0.3, 0.2]), [50, 30, 20])
+        self.assertEqual(porcentajes_enteros([0.995, 0.004, 0.001]), [100, 0, 0])
+        self.assertLessEqual(sum(porcentajes_enteros([1 / 3, 1 / 3, 1 / 3])), 100)
+        self.assertEqual(porcentajes_enteros([]), [])
+
+    def test_probabilidades_iguales_dan_tres_resultados(self):
+        sesion = sesion_con_logits([0] * 8)
+        resultado = EstimadorEmociones(sesion=sesion).estimar(RECORTE)
+        self.assertEqual(len(resultado.top3), 3)
+        self.assertLessEqual(sum(t['porcentaje'] for t in resultado.top3), 100)
+
+    def test_estimacion_sin_top_da_lista_vacia(self):
+        self.assertEqual(Estimacion('feliz', 0.8).top3, [])
+
+    def test_sin_modelo_no_hay_estimacion_ni_top(self):
+        estimador = EstimadorEmociones(ruta_modelo='no_existe/modelo.onnx')
+        self.assertIsNone(estimador.estimar(RECORTE))
+
+
+class Top3EnCamaraTests(TestCase):
+    TOP = (('feliz', 0.60), ('sorpresa', 0.30), ('neutral', 0.05))
+
+    def _camara(self, estimador, registrador=None):
+        cam = Camara(estimador=estimador, registrador=registrador or MagicMock())
+        with patch('emociones.camera.cv2.VideoCapture', return_value=captura_falsa()):
+            cam.iniciar()
+        self.addCleanup(cam.detener)
+        return cam
+
+    def _leer(self, cam, rostros):
+        with patch.object(cam.detector, 'detectar', return_value=rostros):
+            cam.leer_jpeg()
+
+    def test_estado_incluye_el_top3_del_rostro(self):
+        estimador = MagicMock()
+        estimador.estimar.return_value = Estimacion('feliz', 0.60, self.TOP)
+        cam = self._camara(estimador)
+        self._leer(cam, [(10, 10, 30, 30)])
+        self.assertEqual(cam.estado()['top3'], [
+            {'emocion': 'feliz', 'porcentaje': 60},
+            {'emocion': 'sorpresa', 'porcentaje': 30},
+            {'emocion': 'neutral', 'porcentaje': 5},
+        ])
+
+    def test_con_varios_rostros_el_top3_es_del_mas_grande(self):
+        chico = Estimacion('triste', 0.9, (('tristeza', 0.9), ('miedo', 0.05), ('asco', 0.02)))
+        grande = Estimacion('feliz', 0.60, self.TOP)
+        estimador = MagicMock()
+        estimador.estimar.side_effect = [chico, grande]
+        cam = self._camara(estimador)
+        self._leer(cam, [(0, 0, 10, 10), (20, 5, 40, 40)])
+        self.assertEqual(cam.estado()['top3'][0]['emocion'], 'feliz')
+
+    def test_sin_rostro_el_top3_va_vacio(self):
+        cam = self._camara(MagicMock())
+        self._leer(cam, [])
+        self.assertEqual(cam.estado()['top3'], [])
+        self.assertEqual(cam.estado()['rostros'], 0)
+
+    def test_sin_modelo_el_top3_va_vacio_y_el_video_sigue(self):
+        cam = self._camara(EstimadorEmociones(ruta_modelo='no_existe/modelo.onnx'))
+        with patch.object(cam.detector, 'detectar', return_value=[(10, 10, 30, 30)]):
+            jpeg = cam.leer_jpeg()
+        self.assertTrue(jpeg.startswith(b'\xff\xd8'))
+        datos = cam.estado()
+        self.assertEqual(datos['rostros'], 1)
+        self.assertEqual(datos['top3'], [])
+        self.assertIsNone(datos['emocion'])
+
+    def test_al_detener_el_top3_se_borra(self):
+        estimador = MagicMock()
+        estimador.estimar.return_value = Estimacion('feliz', 0.60, self.TOP)
+        cam = self._camara(estimador)
+        self._leer(cam, [(10, 10, 30, 30)])
+        cam.detener()
+        self.assertEqual(cam.estado()['top3'], [])
+
+    def test_el_estado_devuelve_una_copia_del_top3(self):
+        estimador = MagicMock()
+        estimador.estimar.return_value = Estimacion('feliz', 0.60, self.TOP)
+        cam = self._camara(estimador)
+        self._leer(cam, [(10, 10, 30, 30)])
+        cam.estado()['top3'].clear()
+        self.assertEqual(len(cam.estado()['top3']), 3)
+
+    def test_el_registro_sigue_guardando_solo_lo_minimo(self):
+        estimador = MagicMock()
+        estimador.estimar.return_value = Estimacion('feliz', 0.60, self.TOP)
+        cam = self._camara(estimador, registrador=RegistradorEmociones())
+        self._leer(cam, [(10, 10, 30, 30)])
+        registro = RegistroEmocion.objects.get()
+        self.assertEqual((registro.emocion, registro.confianza), ('feliz', 0.60))
+        campos = {c.name for c in RegistroEmocion._meta.get_fields()}
+        self.assertEqual(campos, {'id', 'fecha_hora', 'emocion', 'confianza'})
+
+    def test_el_registro_recibe_solo_emocion_y_confianza(self):
+        estimador = MagicMock()
+        estimador.estimar.return_value = Estimacion('feliz', 0.60, self.TOP)
+        cam = self._camara(estimador, registrador=RegistradorEmociones())
+        with patch.object(RegistroEmocion.objects, 'create') as crear:
+            self._leer(cam, [(10, 10, 30, 30)])
+        crear.assert_called_once_with(emocion='feliz', confianza=0.60)
+
+
+class Top3RutaTests(TestCase):
+    def setUp(self):
+        camara.detener()
+        self.addCleanup(camara.detener)
+
+    def test_la_ruta_estado_incluye_top3_vacio_con_la_camara_apagada(self):
+        datos = self.client.get(reverse('emociones:estado')).json()
+        self.assertEqual(datos['top3'], [])
+
+    def test_la_ruta_estado_entrega_el_top3_de_la_camara(self):
+        top3 = [{'emocion': 'feliz', 'porcentaje': 60}, {'emocion': 'sorpresa', 'porcentaje': 30}]
+        falso = {'activa': True, 'rostros': 1, 'emocion': 'feliz', 'confianza': 60, 'top3': top3}
+        with patch.object(camara, 'estado', return_value=falso):
+            datos = self.client.get(reverse('emociones:estado')).json()
+        self.assertEqual(datos['top3'], top3)
+
+    def test_la_pagina_tiene_el_panel_del_top3(self):
+        html = self.client.get(reverse('emociones:inicio')).content.decode()
+        self.assertIn('id="panel-top3"', html)
+        self.assertIn('Las 3 más probables', html)
+        self.assertIn('No se guarda video ni imágenes', html)
+        self.assertIn('no un diagnóstico', html)
 
 
 class CamaraTests(SimpleTestCase):

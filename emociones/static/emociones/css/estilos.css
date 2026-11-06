@@ -246,6 +246,19 @@ h1 { margin: 0; font-size: 1.6rem; line-height: 1.2; letter-spacing: -0.01em; }
     transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Top 3 de emociones */
+.top3-titulo { margin: 1.5rem 0 0.75rem; font-size: 0.85rem; color: var(--suave); text-transform: uppercase; letter-spacing: 0.06em; }
+.top3 { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.7rem; text-align: left; }
+.top3[hidden], .top3-vacio[hidden] { display: none; }
+.top3-vacio { margin: 0; text-align: center; font-size: 1.4rem; color: var(--suave); }
+.top3-fila { display: grid; grid-template-columns: 1.7rem minmax(0, 1fr) auto; align-items: center; gap: 0.25rem 0.6rem; }
+.top3-fila .emoji { font-family: var(--fuente-emoji); font-size: 1.3rem; line-height: 1; }
+.top3-nombre { font-weight: 600; }
+.top3-cifra { font-variant-numeric: tabular-nums; font-weight: 600; }
+.top3-pista { grid-column: 1 / -1; background: var(--pista); border-radius: 999px; height: 8px; overflow: hidden; }
+.top3-valor { display: block; height: 100%; width: 0; border-radius: 999px; background: #86cfc5; transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+.top3-fila:first-child .top3-valor { background: linear-gradient(90deg, #2bb5a6, var(--principal)); }
+
 .panel-rostros { margin: 1.1rem 0 0; color: var(--suave); }
 .panel-nota { margin: auto 0 0; padding-top: 1rem; font-size: 0.85rem; color: var(--suave); }
 

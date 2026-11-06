@@ -61,6 +61,48 @@
         $('estado-texto').textContent = encendida ? 'Cámara encendida' : 'Cámara apagada';
     }
 
+    // ----- Top 3 de emociones (3 filas fijas que se actualizan en el lugar) -----
+    const listaTop = $('panel-top3');
+    const filasTop = [];
+    for (let i = 0; i < 3; i++) {
+        const li = document.createElement('li');
+        li.className = 'top3-fila';
+        const icono = document.createElement('span');
+        icono.className = 'emoji';
+        icono.setAttribute('aria-hidden', 'true');
+        const nombre = document.createElement('span');
+        nombre.className = 'top3-nombre';
+        const cifra = document.createElement('span');
+        cifra.className = 'top3-cifra';
+        const pista = document.createElement('span');
+        pista.className = 'top3-pista';
+        pista.setAttribute('aria-hidden', 'true');
+        const valor = document.createElement('span');
+        valor.className = 'top3-valor';
+        pista.appendChild(valor);
+        li.append(icono, nombre, cifra, pista);
+        listaTop.appendChild(li);
+        filasTop.push({ li, icono, nombre, cifra, valor });
+    }
+
+    function pintarTop3(top3) {
+        const hay = Array.isArray(top3) && top3.length > 0;
+        listaTop.hidden = !hay;
+        $('top3-vacio').hidden = hay;
+        filasTop.forEach((fila, i) => {
+            const dato = hay ? top3[i] : null;
+            fila.li.hidden = !dato;
+            if (!dato) {
+                fila.valor.style.width = '0';
+                return;
+            }
+            fila.icono.textContent = emojiDe(dato.emocion);
+            fila.nombre.textContent = capitalizar(dato.emocion);
+            fila.cifra.textContent = dato.porcentaje + '%';
+            fila.valor.style.width = dato.porcentaje + '%';
+        });
+    }
+
     // ----- Panel de emoción actual -----
     function pintarPanel(datos) {
         const barra = $('barra');
@@ -94,6 +136,7 @@
             ultimoEmoji = emoji;
         }
         $('panel-emocion').textContent = titulo;
+        pintarTop3(datos && datos.activa && datos.rostros > 0 ? datos.top3 : []);
         $('panel-rostros').textContent = 'Rostros detectados: ' + rostros + nota;
 
         if (porcentaje === null) {

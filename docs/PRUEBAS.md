@@ -33,14 +33,14 @@ python manage.py test
 
 No necesitan cámara real ni el modelo descargado: usan una cámara y un modelo simulados.
 Los archivos y rutas están en `emociones/tests.py`. Resultado de la última ejecución
-(Fase 7): **75 pruebas, OK**. También se comprobó que pasan con el archivo del modelo
+(Fase 11): **97 pruebas, OK**. También se comprobó que pasan con el archivo del modelo
 ausente.
 
 | Módulo | Qué se comprueba |
 |---|---|
 | `camera.py` | Abrir y liberar la cámara; no reabrir si ya está abierta; cámara no disponible; fallo de lectura; flujo de video que libera la cámara al cerrarse; el video sigue si falla el detector; estado del panel (rostros, emoción más grande). |
 | `detector.py` | Imagen en blanco, vacía o nula; recuadros y etiquetas (incluso en los bordes); texto "Sin rostro detectado"; clasificador que no carga. |
-| `emociones.py` | Etiquetas en español; recorte a 64x64; confianza como probabilidad; modelo ausente, corrupto o con salida inválida; el modelo se carga una sola vez. |
+| `emociones.py` | Etiquetas en español; recorte a 64x64; confianza como probabilidad; top 3 ordenado, con porcentajes enteros que suman como máximo 100; modelo ausente, corrupto o con salida inválida; el modelo se carga una sola vez. |
 | `registro.py` | Máximo un registro cada 2 s; no guardar sin estimación; fallo de la base sin romper el video; estadísticas; borrado. |
 | Vistas y rutas | Página de inicio y sus avisos; iniciar, transmitir y detener; solo los métodos permitidos; estadísticas y borrado; archivos estáticos. |
 

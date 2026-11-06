@@ -8,7 +8,7 @@ from .detector import DetectorRostros
 from .emociones import EstimadorEmociones
 from .registro import RegistradorEmociones
 
-SIN_DATOS = {'rostros': 0, 'emocion': None, 'confianza': None}
+SIN_DATOS = {'rostros': 0, 'emocion': None, 'confianza': None, 'top3': []}
 
 
 class Camara:
@@ -61,6 +61,8 @@ class Camara:
             'rostros': len(rostros),
             'emocion': principal.emocion if principal else None,
             'confianza': round(principal.confianza * 100) if principal else None,
+            # Las 3 más probables del rostro más grande. Solo para el panel: no se guardan.
+            'top3': principal.top3 if principal else [],
         }
         # Guarda solo el dato mínimo (y como máximo uno cada 2 s). Nunca rompe el video.
         self.registrador.registrar(principal)
@@ -68,6 +70,7 @@ class Camara:
     def estado(self):
         """Datos para el panel: cámara, cantidad de rostros y emoción actual."""
         resumen = dict(self._ultimo) if self.activa else dict(SIN_DATOS)
+        resumen['top3'] = list(resumen['top3'])  # copia: quien llama no altera el estado interno
         resumen['activa'] = self.activa
         return resumen
 
